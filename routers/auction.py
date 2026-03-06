@@ -23,6 +23,10 @@ def broadcast_auction(alert_id: int):
         "suggested_action": alert.suggested_action,
         "suggested_price": alert.suggested_price,
         "suggested_qty": alert.suggested_qty,
+        "ai_confidence": alert.ai_confidence or 0,
+        "ai_score": alert.ai_score or 0,
+        "ai_summary": alert.ai_summary or "",
+        "ai_factors": alert.ai_factors or [],
         "expires_at": alert.expires_at.isoformat(),
     })
     with _lock:
@@ -71,7 +75,12 @@ def pending():
     return jsonify([{
         "id": a.id, "stock_code": a.stock_code, "stock_name": a.stock_name,
         "suggested_action": a.suggested_action, "suggested_price": a.suggested_price,
-        "suggested_qty": a.suggested_qty, "expires_at": a.expires_at.isoformat(),
+        "suggested_qty": a.suggested_qty,
+        "ai_confidence": a.ai_confidence or 0,
+        "ai_score": a.ai_score or 0,
+        "ai_summary": a.ai_summary or "",
+        "ai_factors": a.ai_factors or [],
+        "expires_at": a.expires_at.isoformat(),
     } for a in alerts])
 
 

@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, jsonify, current_app, request
-from kis_api import get_balance, get_current_price, get_index_price
+from kis_api import get_balance, get_current_price, get_index_price, get_volume_rank
 from models import Strategy
 
 bp = Blueprint("dashboard", __name__)
@@ -72,6 +72,17 @@ def market_prices():
             })
 
     return jsonify(result)
+
+
+@bp.route("/api/market-ranking")
+def market_ranking():
+    """거래량 상위 종목 조회"""
+    mode = current_app.config.get("CURRENT_MODE", "paper")
+    try:
+        data = get_volume_rank(mode)
+    except Exception as e:
+        return jsonify({"error": str(e), "stocks": []}), 500
+    return jsonify({"stocks": data, "mode": mode})
 
 
 @bp.route("/api/stock-price/<stock_code>")

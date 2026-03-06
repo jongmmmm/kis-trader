@@ -1,4 +1,4 @@
-#!/root/kis_trader/venv/bin/python3
+#!/home/pois/kis-trader/venv/bin/python3.9
 # -*- coding: utf-8 -*-
 import re
 import sys

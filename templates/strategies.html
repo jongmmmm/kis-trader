@@ -20,6 +20,60 @@
   </div>
 </div>
 
+<!-- 차트 영역 -->
+<div id="chart-section" class="mt-4" style="display:none;">
+  <div class="card shadow-sm">
+    <div class="card-header">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="mb-0">
+          <i class="fa-solid fa-chart-line me-2"></i>
+          <span id="chart-title">차트</span>
+        </h5>
+        <div class="d-flex align-items-center gap-2">
+          <span id="chart-loading" class="text-muted small" style="display:none;">
+            <i class="fa-solid fa-spinner fa-spin me-1"></i>로딩 중...
+          </span>
+          <button class="btn btn-sm btn-outline-secondary" onclick="refreshChart()">
+            <i class="fa-solid fa-rotate-right me-1"></i>새로고침
+          </button>
+          <button class="btn btn-sm btn-outline-danger" onclick="closeChart()">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+      <div class="btn-group" id="period-buttons" role="group">
+        <button type="button" class="btn btn-sm btn-outline-primary" data-period="day">1일</button>
+        <button type="button" class="btn btn-sm btn-outline-primary active" data-period="month">1개월</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-period="year">1년</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-period="5year">5년</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-period="10year">10년</button>
+      </div>
+      <span id="period-label" class="ms-2 text-muted small">일봉</span>
+    </div>
+    <div class="card-body p-2">
+      <!-- 캔들스틱 + MA 차트 -->
+      <div id="candle-chart" style="height:400px;"></div>
+      <!-- 거래량 차트 -->
+      <div id="volume-chart" style="height:120px;"></div>
+      <!-- 보조지표 영역 -->
+      <div class="row mt-2">
+        <div class="col-md-6">
+          <div class="card border">
+            <div class="card-header py-1 px-2"><small class="fw-bold">RSI</small></div>
+            <div id="rsi-chart" style="height:150px;"></div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card border">
+            <div class="card-header py-1 px-2"><small class="fw-bold">MACD</small></div>
+            <div id="macd-chart" style="height:150px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="addModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -71,6 +125,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 const PARAM_DEFAULTS = {
   ma: '{"short_period":5,"long_period":20,"buy_qty":10,"stop_loss_pct":-3,"take_profit_pct":5}',
@@ -84,6 +139,29 @@ function updateParamHint() {
   document.getElementById("param-hint").textContent = "기본 파라미터 예시가 자동 입력됐습니다.";
 }
 updateParamHint();
+
+/* ---------- 기간 선택 ---------- */
+let currentPeriod = "month";
+let currentChartStrategyId = null;
+let currentChartStockName = null;
+
+const periodLabels = {
+  day: "일봉 (최근 30일)",
+  month: "일봉 (최근 3개월)",
+  year: "일봉 (최근 1년)",
+  "5year": "주봉 (최근 5년)",
+  "10year": "월봉 (최근 10년)",
+};
+
+document.getElementById("period-buttons").addEventListener("click", e => {
+  const btn = e.target.closest("[data-period]");
+  if (!btn || !currentChartStrategyId) return;
+  document.querySelectorAll("#period-buttons .btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  currentPeriod = btn.dataset.period;
+  document.getElementById("period-label").textContent = periodLabels[currentPeriod] || "";
+  openChart(currentChartStrategyId, currentChartStockName);
+});
 
 function loadStrategies() {
   fetch("/strategies/api/strategies").then(r => r.json()).then(list => {
@@ -99,6 +177,14 @@ function loadStrategies() {
     const typeLabel = {ma:"MA/EMA", rsi_macd:"RSI/MACD", condition:"조건식", ml:"AI/ML"};
     list.forEach(s => {
       const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.addEventListener("click", (e) => {
+        if (e.target.closest("button") || e.target.closest(".badge")) return;
+        openChart(s.id, s.stock_name || s.stock_code);
+      });
+      if (currentChartStrategyId === s.id) {
+        tr.classList.add("table-active");
+      }
       [s.name, s.stock_code + " " + s.stock_name,
        typeLabel[s.strategy_type] || s.strategy_type,
        s.mode === "real" ? "실전" : "모의"].forEach(text => {
@@ -147,6 +233,192 @@ function addStrategy() {
     loadStrategies();
   });
 }
+
+/* ---------- 차트 ---------- */
+let candleChart = null, volumeChart = null, rsiChart = null, macdChart = null;
+let chartRefreshTimer = null;
+
+function destroyCharts() {
+  [candleChart, volumeChart, rsiChart, macdChart].forEach(c => { if (c) c.remove(); });
+  candleChart = volumeChart = rsiChart = macdChart = null;
+}
+
+function closeChart() {
+  document.getElementById("chart-section").style.display = "none";
+  currentChartStrategyId = null;
+  destroyCharts();
+  if (chartRefreshTimer) { clearInterval(chartRefreshTimer); chartRefreshTimer = null; }
+  loadStrategies();
+}
+
+function refreshChart() {
+  if (currentChartStrategyId) openChart(currentChartStrategyId);
+}
+
+function openChart(strategyId, stockName) {
+  currentChartStrategyId = strategyId;
+  if (stockName) currentChartStockName = stockName;
+  const section = document.getElementById("chart-section");
+  section.style.display = "block";
+  document.getElementById("chart-loading").style.display = "inline";
+  document.getElementById("period-label").textContent = periodLabels[currentPeriod] || "";
+  if (currentChartStockName) {
+    document.getElementById("chart-title").textContent = currentChartStockName + " 차트";
+  }
+  loadStrategies();
+
+  const url = "/strategies/api/strategies/" + strategyId + "/chart?period=" + currentPeriod;
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById("chart-loading").style.display = "none";
+      if (data.error) { alert(data.error); return; }
+      renderCharts(data);
+
+      if (chartRefreshTimer) clearInterval(chartRefreshTimer);
+      chartRefreshTimer = setInterval(() => {
+        fetch(url)
+          .then(r => r.json())
+          .then(d => { if (!d.error) renderCharts(d); })
+          .catch(() => {});
+      }, 60000);
+    })
+    .catch(err => {
+      document.getElementById("chart-loading").style.display = "none";
+      alert("차트 데이터 로딩 실패: " + err.message);
+    });
+
+  section.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+const chartColors = {
+  bg: "#ffffff",
+  text: "#333333",
+  grid: "#f0f0f0",
+  maShort: "#e74c3c",
+  maLong: "#3498db",
+  ma60: "#9b59b6",
+  volUp: "rgba(231,76,60,0.5)",
+  volDown: "rgba(52,152,219,0.5)",
+  rsi: "#8e44ad",
+  rsiOver: "rgba(231,76,60,0.15)",
+  rsiUnder: "rgba(52,152,219,0.15)",
+  macd: "#2980b9",
+  macdSignal: "#e67e22",
+  macdHistUp: "rgba(231,76,60,0.6)",
+  macdHistDown: "rgba(52,152,219,0.6)",
+};
+
+function createChart(containerId, height) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = "";
+  return LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: height || container.clientHeight || 300,
+    layout: { background: { type: "solid", color: chartColors.bg }, textColor: chartColors.text, fontSize: 11 },
+    grid: { vertLines: { color: chartColors.grid }, horzLines: { color: chartColors.grid } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: "#ddd" },
+    timeScale: { borderColor: "#ddd", timeVisible: false },
+    localization: { priceFormatter: p => p.toLocaleString("ko-KR") },
+  });
+}
+
+function renderCharts(data) {
+  destroyCharts();
+  const candles = data.candles;
+  if (!candles || !candles.length) return;
+
+  /* --- 1. 캔들스틱 + 이동평균 --- */
+  candleChart = createChart("candle-chart", 400);
+  const candleSeries = candleChart.addCandlestickSeries({
+    upColor: "#e74c3c", downColor: "#3498db",
+    borderUpColor: "#e74c3c", borderDownColor: "#3498db",
+    wickUpColor: "#e74c3c", wickDownColor: "#3498db",
+  });
+  candleSeries.setData(candles.map(c => ({
+    time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+  })));
+
+  const maShortSeries = candleChart.addLineSeries({ color: chartColors.maShort, lineWidth: 1, title: "MA" + (data.params.short_period || 5) });
+  maShortSeries.setData(candles.filter(c => c.ma_short > 0).map(c => ({ time: c.time, value: c.ma_short })));
+
+  const maLongSeries = candleChart.addLineSeries({ color: chartColors.maLong, lineWidth: 1, title: "MA" + (data.params.long_period || 20) });
+  maLongSeries.setData(candles.filter(c => c.ma_long > 0).map(c => ({ time: c.time, value: c.ma_long })));
+
+  const ma60Series = candleChart.addLineSeries({ color: chartColors.ma60, lineWidth: 1, title: "MA60" });
+  ma60Series.setData(candles.filter(c => c.ma60 > 0).map(c => ({ time: c.time, value: c.ma60 })));
+
+  candleChart.timeScale().fitContent();
+
+  /* --- 2. 거래량 --- */
+  volumeChart = createChart("volume-chart", 120);
+  const volSeries = volumeChart.addHistogramSeries({
+    priceFormat: { type: "volume" },
+    priceScaleId: "vol",
+  });
+  volSeries.setData(candles.map(c => ({
+    time: c.time,
+    value: c.volume,
+    color: c.close >= c.open ? chartColors.volUp : chartColors.volDown,
+  })));
+  const volMaSeries = volumeChart.addLineSeries({ color: "#f39c12", lineWidth: 1, title: "Vol MA20", priceScaleId: "vol" });
+  volMaSeries.setData(candles.filter(c => c.vol_ma20 > 0).map(c => ({ time: c.time, value: c.vol_ma20 })));
+  volumeChart.timeScale().fitContent();
+
+  /* --- 3. RSI --- */
+  rsiChart = createChart("rsi-chart", 150);
+  const rsiSeries = rsiChart.addLineSeries({ color: chartColors.rsi, lineWidth: 2, title: "RSI" });
+  rsiSeries.setData(candles.filter(c => c.rsi > 0).map(c => ({ time: c.time, value: c.rsi })));
+
+  const rsiOver = data.params.rsi_overbought || 70;
+  const rsiUnder = data.params.rsi_oversold || 30;
+  const rsiOverLine = rsiChart.addLineSeries({ color: "#e74c3c", lineWidth: 1, lineStyle: 2, title: "과매수 " + rsiOver });
+  rsiOverLine.setData(candles.map(c => ({ time: c.time, value: rsiOver })));
+  const rsiUnderLine = rsiChart.addLineSeries({ color: "#3498db", lineWidth: 1, lineStyle: 2, title: "과매도 " + rsiUnder });
+  rsiUnderLine.setData(candles.map(c => ({ time: c.time, value: rsiUnder })));
+  rsiChart.timeScale().fitContent();
+
+  /* --- 4. MACD --- */
+  macdChart = createChart("macd-chart", 150);
+  const macdLine = macdChart.addLineSeries({ color: chartColors.macd, lineWidth: 2, title: "MACD" });
+  macdLine.setData(candles.map(c => ({ time: c.time, value: c.macd })));
+  const signalLine = macdChart.addLineSeries({ color: chartColors.macdSignal, lineWidth: 1, title: "Signal" });
+  signalLine.setData(candles.map(c => ({ time: c.time, value: c.macd_signal })));
+  const histSeries = macdChart.addHistogramSeries({ title: "Histogram" });
+  histSeries.setData(candles.map(c => ({
+    time: c.time, value: c.macd_hist,
+    color: c.macd_hist >= 0 ? chartColors.macdHistUp : chartColors.macdHistDown,
+  })));
+  macdChart.timeScale().fitContent();
+
+  /* --- 차트 시간축 동기화 --- */
+  const charts = [candleChart, volumeChart, rsiChart, macdChart];
+  let syncing = false;
+  charts.forEach(chart => {
+    chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (syncing) return;
+      syncing = true;
+      charts.forEach(other => {
+        if (other !== chart) other.timeScale().setVisibleLogicalRange(range);
+      });
+      syncing = false;
+    });
+  });
+
+  /* --- 반응형 리사이즈 --- */
+  const ro = new ResizeObserver(() => {
+    [["candle-chart", candleChart], ["volume-chart", volumeChart],
+     ["rsi-chart", rsiChart], ["macd-chart", macdChart]].forEach(([id, c]) => {
+      if (c) {
+        const el = document.getElementById(id);
+        c.applyOptions({ width: el.clientWidth });
+      }
+    });
+  });
+  ro.observe(document.getElementById("candle-chart"));
+}
+
 loadStrategies();
 </script>
 {% endblock %}

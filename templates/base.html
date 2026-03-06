@@ -44,19 +44,67 @@
   <main class="flex-grow-1 p-4">{% block content %}{% endblock %}</main>
 </div>
 
-<!-- 동시호가 팝업 -->
+<!-- 동시호가 AI 분석 팝업 -->
 <div id="auction-overlay">
-  <div class="auction-card">
-    <h5 class="fw-bold mb-3"><i class="fa-solid fa-bell text-warning me-2"></i>동시호가 알림</h5>
-    <p class="mb-1"><strong>종목:</strong> <span id="au-name"></span> (<span id="au-code"></span>)</p>
-    <p class="mb-1"><strong>추천:</strong> <span id="au-action" class="badge"></span></p>
-    <p class="mb-1"><strong>가격:</strong> <span id="au-price"></span>원</p>
-    <p class="mb-3"><strong>수량:</strong> <span id="au-qty"></span>주</p>
-    <p class="text-muted small mb-3">만료: <span id="au-expires"></span></p>
+  <div class="auction-card" style="min-width:480px; max-width:560px;">
+    <h5 class="fw-bold mb-3"><i class="fa-solid fa-brain text-warning me-2"></i>AI 동시호가 분석</h5>
+
+    <!-- 종목 정보 -->
+    <div class="d-flex justify-content-between align-items-center mb-3 pb-2" style="border-bottom:1px solid #eee;">
+      <div>
+        <span class="fw-bold fs-5" id="au-name"></span>
+        <span class="text-muted ms-1" id="au-code"></span>
+      </div>
+      <div class="text-end">
+        <span class="fw-bold fs-5" id="au-price"></span><span class="text-muted">원</span>
+        <span class="ms-1 small" id="au-qty-info"></span>
+      </div>
+    </div>
+
+    <!-- AI 판단 요약 -->
+    <div class="d-flex align-items-center gap-3 mb-3 p-2 rounded" id="au-verdict-box" style="background:#f8f9fa;">
+      <div>
+        <span id="au-action" class="badge fs-6 px-3 py-2"></span>
+      </div>
+      <div class="flex-grow-1">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span class="small fw-bold">신뢰도</span>
+          <div class="progress flex-grow-1" style="height:8px;">
+            <div class="progress-bar" id="au-confidence-bar" role="progressbar" style="width:0%"></div>
+          </div>
+          <span class="small fw-bold" id="au-confidence-val">0%</span>
+        </div>
+        <div class="small text-muted">
+          종합점수: <strong id="au-score">0</strong>점
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 분석 상세 (팩터) -->
+    <div class="mb-3" style="max-height:180px; overflow-y:auto;">
+      <table class="table table-sm mb-0" style="font-size:.78rem;">
+        <thead><tr><th>분석 항목</th><th class="text-center" style="width:80px;">점수</th><th>근거</th></tr></thead>
+        <tbody id="au-factors"></tbody>
+      </table>
+    </div>
+
+    <!-- AI 요약 -->
+    <div class="p-2 rounded mb-3" style="background:#f0f4ff; font-size:.82rem; white-space:pre-line;" id="au-summary"></div>
+
+    <!-- 만료 시간 -->
+    <p class="text-muted small mb-3 text-center">만료: <span id="au-expires"></span></p>
+
+    <!-- 사용자 결정 버튼 -->
     <div class="d-flex gap-2">
-      <button class="btn btn-danger flex-fill" onclick="auctionDecide('sell')">매도</button>
-      <button class="btn btn-primary flex-fill" onclick="auctionDecide('buy')">매수</button>
-      <button class="btn btn-secondary flex-fill" onclick="auctionDecide('pass')">패스</button>
+      <button class="btn btn-danger flex-fill py-2" onclick="auctionDecide('sell')">
+        <i class="fa-solid fa-arrow-down me-1"></i>매도 (돈 빼기)
+      </button>
+      <button class="btn btn-primary flex-fill py-2" onclick="auctionDecide('buy')">
+        <i class="fa-solid fa-arrow-up me-1"></i>매수 (돈 넣기)
+      </button>
+      <button class="btn btn-secondary flex-fill py-2" onclick="auctionDecide('pass')">
+        <i class="fa-solid fa-hand me-1"></i>패스
+      </button>
     </div>
   </div>
 </div>

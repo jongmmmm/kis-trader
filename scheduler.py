@@ -9,10 +9,11 @@ _scheduler = None
 
 def check_auction_and_alert(app):
     from strategies import is_auction_time
+    from strategies.ai_analyzer import analyze_stock
     from datetime import datetime
     from db import db
     from models import Strategy, AuctionAlert
-    from kis_api import get_current_price
+    from kis_api import get_current_price, get_daily_ohlcv
     from routers.auction import broadcast_auction
 
     with app.app_context():
@@ -30,7 +31,14 @@ def check_auction_and_alert(app):
                 continue
             try:
                 current = get_current_price(strat.stock_code, strat.mode)
-                action = "buy" if current["change_rate"] >= 0 else "sell"
+                ohlcv = get_daily_ohlcv(strat.stock_code, strat.mode, count=100)
+
+                # RAG AI 분석 수행
+                analysis = analyze_stock(ohlcv, current, strat.params or {})
+                action = analysis["action"]
+                if action == "hold":
+                    action = "sell" if current["change_rate"] < -2 else "buy"
+
                 qty = int((strat.params or {}).get("buy_qty", 1))
                 alert = AuctionAlert(
                     strategy_id=strat.id,
@@ -39,6 +47,10 @@ def check_auction_and_alert(app):
                     suggested_action=action,
                     suggested_price=current["price"],
                     suggested_qty=qty,
+                    ai_confidence=analysis["confidence"],
+                    ai_score=analysis["total_score"],
+                    ai_summary=analysis["summary"],
+                    ai_factors=analysis["factors"],
                     expires_at=expires,
                 )
                 db.session.add(alert)

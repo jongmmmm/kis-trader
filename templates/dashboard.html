@@ -9,6 +9,10 @@
   </div>
 </div>
 
+<div class="row">
+<!-- 왼쪽 메인 영역 -->
+<div class="col-lg-8">
+
 <!-- 코스피 / 코스닥 지수 -->
 <div class="row g-3 mb-4">
   <div class="col-md-6">
@@ -118,6 +122,23 @@
     </table>
   </div>
 </div>
+
+</div><!-- /col-lg-8 -->
+
+<!-- 오른쪽 실시간 등락 사이드바 -->
+<div class="col-lg-4">
+  <div class="card shadow-sm border-0 sticky-sidebar">
+    <div class="card-header fw-bold d-flex justify-content-between align-items-center py-2">
+      <span><i class="fa-solid fa-fire me-1 text-danger"></i>거래량 TOP</span>
+      <span id="rank-update" class="text-muted" style="font-size:.65rem"></span>
+    </div>
+    <div class="card-body p-0" id="rank-container" style="max-height:calc(100vh - 140px); overflow-y:auto;">
+      <div class="text-center text-muted py-4 small">로딩 중...</div>
+    </div>
+  </div>
+</div><!-- /col-lg-4 -->
+
+</div><!-- /row -->
 {% endblock %}
 
 {% block scripts %}
@@ -143,6 +164,27 @@
   .remove-btn:hover { color:#e74c3c; }
   .arrow-up::before { content: "\25B2 "; font-size:.7em; }
   .arrow-down::before { content: "\25BC "; font-size:.7em; }
+
+  /* 오른쪽 사이드바 */
+  .sticky-sidebar { position: sticky; top: 70px; }
+  .rank-item { display: flex; align-items: center; padding: 8px 12px; border-bottom: 1px solid #f0f0f0; transition: background .15s; cursor: default; }
+  .rank-item:hover { background: #f8f9fa; }
+  .rank-item:last-child { border-bottom: none; }
+  .rank-num { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .7rem; font-weight: bold; color: #fff; flex-shrink: 0; margin-right: 10px; }
+  .rank-1 { background: #e74c3c; }
+  .rank-2 { background: #e67e22; }
+  .rank-3 { background: #f1c40f; color: #333; }
+  .rank-other { background: #bdc3c7; }
+  .rank-info { flex: 1; min-width: 0; }
+  .rank-name { font-size: .82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rank-code { font-size: .65rem; color: #999; }
+  .rank-price { text-align: right; flex-shrink: 0; margin-left: 8px; }
+  .rank-price-val { font-size: .82rem; font-weight: 600; }
+  .rank-change { font-size: .7rem; }
+  .rank-vol { font-size: .6rem; color: #999; text-align: right; }
+  .rank-bar { height: 3px; border-radius: 2px; margin-top: 2px; transition: width .3s; }
+  .rank-bar-up { background: linear-gradient(90deg, #e74c3c, #ff6b6b); }
+  .rank-bar-down { background: linear-gradient(90deg, #3498db, #74b9ff); }
 </style>
 <script>
 // 추가 종목 관리 (localStorage)
@@ -176,6 +218,11 @@ function removeExtra(code) {
 // 숫자 포맷
 function fmt(n) { return n != null ? Number(n).toLocaleString("ko-KR") : "-"; }
 function fmtF(n, d) { return n != null ? Number(n).toFixed(d || 2) : "-"; }
+function fmtVol(n) {
+  if (n >= 100000000) return (n / 100000000).toFixed(1) + "억";
+  if (n >= 10000) return (n / 10000).toFixed(0) + "만";
+  return fmt(n);
+}
 
 // 변동 CSS 클래스
 function chgClass(val) {
@@ -306,10 +353,64 @@ function loadBalance() {
   });
 }
 
-// 초기 로드 + 3초 갱신
+/* ---------- 거래량 TOP 사이드바 ---------- */
+let prevRankPrices = {};
+
+function loadRanking() {
+  fetch("/api/market-ranking").then(r => r.json()).then(d => {
+    const container = document.getElementById("rank-container");
+    if (!d.stocks || !d.stocks.length) {
+      container.innerHTML = '<div class="text-center text-muted py-4 small">데이터 없음</div>';
+      return;
+    }
+
+    const maxVol = Math.max(...d.stocks.map(s => s.volume));
+    const fragment = document.createDocumentFragment();
+
+    d.stocks.forEach((s, i) => {
+      const cls = chgClass(s.change_rate);
+      const sign = s.change_rate > 0 ? "+" : "";
+      const arrow = s.change_rate > 0 ? "\u25B2" : s.change_rate < 0 ? "\u25BC" : "";
+      const barPct = maxVol > 0 ? Math.round((s.volume / maxVol) * 100) : 0;
+
+      const prevKey = "rank_" + s.stock_code;
+      const flashed = prevRankPrices[prevKey] !== undefined && prevRankPrices[prevKey] !== s.price;
+      prevRankPrices[prevKey] = s.price;
+
+      const item = document.createElement("div");
+      item.className = "rank-item" + (flashed ? " flash" : "");
+
+      const rankCls = i < 1 ? "rank-1" : i < 2 ? "rank-2" : i < 3 ? "rank-3" : "rank-other";
+
+      item.innerHTML =
+        '<div class="rank-num ' + rankCls + '">' + (i + 1) + '</div>' +
+        '<div class="rank-info">' +
+          '<div class="rank-name">' + s.stock_name + '</div>' +
+          '<div class="rank-code">' + s.stock_code + '</div>' +
+          '<div class="rank-bar ' + (s.change_rate >= 0 ? 'rank-bar-up' : 'rank-bar-down') + '" style="width:' + barPct + '%"></div>' +
+        '</div>' +
+        '<div class="rank-price">' +
+          '<div class="rank-price-val ' + cls + '">' + fmt(s.price) + '</div>' +
+          '<div class="rank-change ' + cls + '">' + arrow + ' ' + sign + fmtF(s.change_rate) + '%</div>' +
+          '<div class="rank-vol">' + fmtVol(s.volume) + '</div>' +
+        '</div>';
+
+      fragment.appendChild(item);
+    });
+
+    container.textContent = "";
+    container.appendChild(fragment);
+    document.getElementById("rank-update").textContent =
+      new Date().toLocaleTimeString("ko-KR");
+  }).catch(() => {});
+}
+
+// 초기 로드 + 갱신
 loadMarketPrices();
 loadBalance();
+loadRanking();
 setInterval(loadMarketPrices, 3000);
 setInterval(loadBalance, 30000);
+setInterval(loadRanking, 5000);
 </script>
 {% endblock %}

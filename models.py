@@ -33,10 +33,14 @@ class AuctionAlert(db.Model):
     strategy_id = db.Column(db.Integer, db.ForeignKey("strategies.id"), nullable=True)
     stock_code = db.Column(db.String(10), nullable=False)
     stock_name = db.Column(db.String(50), default="")
-    suggested_action = db.Column(db.String(4))   # buy|sell
+    suggested_action = db.Column(db.String(4))   # buy|sell|hold
     suggested_price = db.Column(db.Float, default=0)
     suggested_qty = db.Column(db.Integer, default=0)
-    user_decision = db.Column(db.String(4), nullable=True)  # buy|sell|pass|None
+    ai_confidence = db.Column(db.Integer, default=0)          # 0~100
+    ai_score = db.Column(db.Float, default=0)                 # -100~100
+    ai_summary = db.Column(db.Text, default="")               # AI 종합 요약
+    ai_factors = db.Column(db.JSON, default=[])               # 팩터별 분석 상세
+    user_decision = db.Column(db.String(4), nullable=True)    # buy|sell|pass|None
     decided_at = db.Column(db.DateTime, nullable=True)
     expires_at = db.Column(db.DateTime, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

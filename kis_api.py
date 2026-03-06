@@ -87,17 +87,18 @@ def get_current_price(stock_code: str, mode: str = "paper") -> dict:
     }
 
 
-def get_daily_ohlcv(stock_code: str, mode: str = "paper", count: int = 100) -> list:
-    """일봉 데이터 조회"""
+def get_daily_ohlcv(stock_code: str, mode: str = "paper", count: int = 100,
+                     period_code: str = "D", start_date: str = "19000101") -> list:
+    """일봉/주봉/월봉 데이터 조회 (period_code: D=일, W=주, M=월)"""
     from datetime import date
     url = f"{_base_url(mode)}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
     today = date.today().strftime("%Y%m%d")
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_INPUT_ISCD": stock_code,
-        "FID_INPUT_DATE_1": "19000101",
+        "FID_INPUT_DATE_1": start_date,
         "FID_INPUT_DATE_2": today,
-        "FID_PERIOD_DIV_CODE": "D",
+        "FID_PERIOD_DIV_CODE": period_code,
         "FID_ORG_ADJ_PRC": "0",
     }
     resp = requests.get(url, headers=_headers(mode, "FHKST03010100"), params=params, timeout=15)
@@ -167,6 +168,40 @@ def get_index_price(index_code: str, mode: str = "paper") -> dict:
         "low": float(output.get("bstp_nmix_lwpr", 0)),
         "volume": int(output.get("acml_vol", 0)),
     }
+
+
+def get_volume_rank(mode: str = "paper") -> list:
+    """거래량 상위 종목 조회"""
+    url = f"{_base_url(mode)}/uapi/domestic-stock/v1/quotations/volume-rank"
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_COND_SCR_DIV_CODE": "20171",
+        "FID_INPUT_ISCD": "0000",
+        "FID_DIV_CLS_CODE": "0",
+        "FID_BLNG_CLS_CODE": "0",
+        "FID_TRGT_CLS_CODE": "111111111",
+        "FID_TRGT_EXLS_CLS_CODE": "000000",
+        "FID_INPUT_PRICE_1": "0",
+        "FID_INPUT_PRICE_2": "0",
+        "FID_VOL_CNT": "0",
+        "FID_INPUT_DATE_1": "",
+    }
+    resp = requests.get(url, headers=_headers(mode, "FHPST01710000"), params=params, timeout=10)
+    resp.raise_for_status()
+    output = resp.json().get("output", [])
+    result = []
+    for row in output[:30]:
+        result.append({
+            "rank": int(row.get("data_rank", 0)),
+            "stock_code": row.get("mksc_shrn_iscd", ""),
+            "stock_name": row.get("hts_kor_isnm", ""),
+            "price": int(row.get("stck_prpr", 0)),
+            "change_rate": float(row.get("prdy_ctrt", 0)),
+            "change_val": int(row.get("prdy_vrss", 0)),
+            "volume": int(row.get("acml_vol", 0)),
+            "change_sign": row.get("prdy_vrss_sign", "3"),
+        })
+    return result
 
 
 def get_balance(mode: str = "paper") -> list:
