@@ -201,6 +201,16 @@ function loadStrategies() {
       });
       tdS.appendChild(badge); tr.appendChild(tdS);
       const tdB = document.createElement("td");
+      tdB.className = "d-flex gap-1";
+      const aiBtn = document.createElement("button");
+      aiBtn.className = "btn btn-sm btn-outline-info";
+      aiBtn.innerHTML = '<i class="fa-solid fa-brain"></i>';
+      aiBtn.title = "AI 분석";
+      aiBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        runAiAnalysis(s.id);
+      });
+      tdB.appendChild(aiBtn);
       const btn = document.createElement("button");
       btn.className = "btn btn-sm btn-outline-danger";
       btn.textContent = "삭제";
@@ -417,6 +427,31 @@ function renderCharts(data) {
     });
   });
   ro.observe(document.getElementById("candle-chart"));
+}
+
+/* ---------- AI 분석 (수동 실행) ---------- */
+function runAiAnalysis(strategyId) {
+  if (!confirm("AI 분석을 실행하시겠습니까? (몇 초 소요)")) return;
+  fetch("/strategies/api/strategies/" + strategyId + "/ai-analyze")
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { alert("분석 실패: " + data.error); return; }
+      // auction popup 형식으로 표시
+      showAuctionPopup({
+        id: null,
+        stock_code: data.stock_code,
+        stock_name: data.stock_name,
+        suggested_action: data.action,
+        suggested_price: data.price,
+        suggested_qty: 0,
+        ai_confidence: data.confidence,
+        ai_score: data.total_score,
+        ai_summary: data.summary,
+        ai_factors: data.factors,
+        expires_at: new Date(Date.now() + 600000).toISOString(),
+      });
+    })
+    .catch(err => alert("분석 오류: " + err.message));
 }
 
 loadStrategies();
