@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>지문 등록 — KIS 자동매매</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    body { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .card { background: #fff; border-radius: 16px; padding: 40px; width: 100%; max-width: 480px; box-shadow: 0 8px 40px rgba(0,0,0,.3); text-align: center; }
+    .fingerprint-icon { font-size: 80px; color: #11998e; margin-bottom: 20px; }
+    .fingerprint-icon.success { color: #28a745; }
+    .fingerprint-icon.pulse { animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.7; } }
+    .btn-register { background: linear-gradient(135deg, #11998e, #38ef7d); border: none; color: #fff; font-weight: 700; padding: 14px 40px; border-radius: 12px; font-size: 1.1rem; }
+    .btn-register:hover { background: linear-gradient(135deg, #0e8a7e, #30d96e); color: #fff; }
+    .btn-skip { color: #999; text-decoration: none; }
+    .btn-skip:hover { color: #666; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div id="step-register">
+    <i class="fa-solid fa-fingerprint fingerprint-icon" id="fp-icon"></i>
+    <h4 class="fw-bold mb-2">지문 등록</h4>
+    <p class="text-muted mb-4">지문을 등록하면 비밀번호 없이<br>빠르게 로그인할 수 있습니다.</p>
+    <div id="status-msg" class="mb-3"></div>
+    <div id="no-webauthn" style="display:none;" class="mb-3">
+      <div class="alert alert-warning small mb-2">
+        현재 브라우저에서는 지문 등록이 지원되지 않습니다.<br>
+        <b>Chrome 브라우저</b>에서 다시 접속하여 등록해주세요.
+      </div>
+      <a href="/" class="btn btn-register">홈으로 이동</a>
+    </div>
+    <div id="webauthn-available">
+      <button class="btn btn-register mb-3" id="register-btn" onclick="startRegistration()">
+        <i class="fa-solid fa-fingerprint me-2"></i>지문 등록하기
+      </button>
+      <br>
+      <a href="/" class="btn-skip small">나중에 하기</a>
+    </div>
+  </div>
+
+  <div id="step-done" style="display:none;">
+    <i class="fa-solid fa-circle-check fingerprint-icon success"></i>
+    <h4 class="fw-bold mb-2">등록 완료!</h4>
+    <p class="text-muted mb-4">지문이 성공적으로 등록되었습니다.<br>다음 로그인부터 지문인식을 사용할 수 있습니다.</p>
+    <a href="/" class="btn btn-register">시작하기</a>
+  </div>
+</div>
+
+<script>
+// 브라우저 지원 여부 확인
+if (!window.PublicKeyCredential) {
+  document.getElementById("webauthn-available").style.display = "none";
+  document.getElementById("no-webauthn").style.display = "block";
+}
+
+async function startRegistration() {
+  var btn = document.getElementById("register-btn");
+  var icon = document.getElementById("fp-icon");
+  var statusMsg = document.getElementById("status-msg");
+  btn.disabled = true;
+  icon.classList.add("pulse");
+  statusMsg.innerHTML = '<span class="text-muted">기기에서 지문을 인식해주세요...</span>';
+
+  try {
+    // 1. 서버에서 등록 옵션 가져오기
+    var optRes = await fetch("/api/webauthn/register/options", { method: "POST" });
+    if (!optRes.ok) {
+      var err = await optRes.json();
+      throw new Error(err.msg || "옵션 생성 실패");
+    }
+    var options = await optRes.json();
+
+    // ArrayBuffer 변환
+    options.challenge = base64urlToBuffer(options.challenge);
+    options.user.id = base64urlToBuffer(options.user.id);
+    if (options.excludeCredentials) {
+      options.excludeCredentials = options.excludeCredentials.map(function(c) {
+        c.id = base64urlToBuffer(c.id);
+        return c;
+      });
+    }
+
+    // 2. 브라우저 WebAuthn API 호출 (지문 스캔)
+    var credential = await navigator.credentials.create({ publicKey: options });
+
+    // 3. 서버로 결과 전송
+    var verifyBody = {
+      id: credential.id,
+      rawId: bufferToBase64url(credential.rawId),
+      type: credential.type,
+      response: {
+        attestationObject: bufferToBase64url(credential.response.attestationObject),
+        clientDataJSON: bufferToBase64url(credential.response.clientDataJSON)
+      }
+    };
+
+    var verifyRes = await fetch("/api/webauthn/register/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(verifyBody)
+    });
+    var result = await verifyRes.json();
+
+    if (result.success) {
+      // 지문 로그인용 사용자명 저장
+      localStorage.setItem("kis_webauthn_user", "{{ current_user.username }}");
+      document.getElementById("step-register").style.display = "none";
+      document.getElementById("step-done").style.display = "block";
+    } else {
+      throw new Error(result.msg || "등록 실패");
+    }
+  } catch (e) {
+    icon.classList.remove("pulse");
+    btn.disabled = false;
+    if (e.name === "NotAllowedError") {
+      statusMsg.innerHTML = '<span class="text-danger">지문 인식이 취소되었습니다. 다시 시도해주세요.</span>';
+    } else {
+      statusMsg.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+    }
+  }
+}
+
+function base64urlToBuffer(base64url) {
+  var base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  var pad = base64.length % 4;
+  if (pad) base64 += "=".repeat(4 - pad);
+  var binary = atob(base64);
+  var bytes = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function bufferToBase64url(buffer) {
+  var bytes = new Uint8Array(buffer);
+  var binary = "";
+  for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+</script>
+</body>
+</html>

@@ -1,9 +1,11 @@
 from flask import Blueprint, render_template, jsonify, request
+from flask_login import login_required
 from models import Order
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
 @bp.route("/")
+@login_required
 def index():
     return render_template("orders.html")
 

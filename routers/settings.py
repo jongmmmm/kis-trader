@@ -1,8 +1,10 @@
 from flask import Blueprint, render_template, request, jsonify, current_app
+from flask_login import login_required
 
 bp = Blueprint("settings", __name__)
 
 @bp.route("/settings/")
+@login_required
 def index():
     return render_template("settings.html")
 

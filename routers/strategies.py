@@ -1,5 +1,6 @@
 import pandas as pd
 from flask import Blueprint, render_template, request, jsonify
+from flask_login import login_required
 from db import db
 from models import Strategy
 from kis_api import get_daily_ohlcv, get_current_price
@@ -8,6 +9,7 @@ from strategies.ai_analyzer import analyze_stock
 bp = Blueprint("strategies", __name__, url_prefix="/strategies")
 
 @bp.route("/")
+@login_required
 def index():
     return render_template("strategies.html")
 

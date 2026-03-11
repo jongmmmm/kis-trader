@@ -19,26 +19,49 @@
     #auction-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 9999; align-items: center; justify-content: center; }
     #auction-overlay.show { display: flex; }
     .auction-card { background: #fff; border-radius: 14px; padding: 32px; min-width: 360px; box-shadow: 0 8px 40px rgba(0,0,0,.35); }
+    .user-info { color: #ccc; font-size: .85rem; }
+    .user-info a { color: #ccc; text-decoration: none; margin-left: 10px; }
+    .user-info a:hover { color: #fff; }
+    @media (max-width: 768px) {
+      .sidebar { width: 60px; }
+      .sidebar a span { display: none; }
+      .sidebar a { text-align: center; padding: 10px 5px; }
+      .sidebar a i { margin: 0 !important; font-size: 1.2rem; }
+      .auction-card { min-width: auto !important; max-width: 95vw !important; padding: 20px; }
+      main { padding: 12px !important; }
+    }
   </style>
 </head>
 <body>
 <nav class="navbar px-3 py-2 d-flex justify-content-between">
   <span class="navbar-brand">KIS 자동매매</span>
-  <span id="mode-badge" class="mode-badge mode-paper">모의투자</span>
+  <div class="d-flex align-items-center gap-3">
+    <span id="mode-badge" class="mode-badge mode-paper">모의투자</span>
+    {% if current_user.is_authenticated %}
+    <div class="user-info">
+      <i class="fa-solid fa-user"></i> {{ current_user.name or current_user.username }}
+      <a href="/logout"><i class="fa-solid fa-right-from-bracket"></i> 로그아웃</a>
+    </div>
+    {% else %}
+    <a href="/login" class="btn btn-sm btn-outline-light">
+      <i class="fa-solid fa-right-to-bracket me-1"></i>로그인
+    </a>
+    {% endif %}
+  </div>
 </nav>
 <div class="d-flex">
   <nav class="sidebar">
     <a href="/" class="{% if request.path == '/' %}active{% endif %}">
-      <i class="fa-solid fa-chart-line me-2"></i>대시보드
+      <i class="fa-solid fa-chart-line me-2"></i><span>대시보드</span>
     </a>
     <a href="/strategies/" class="{% if '/strategies' in request.path %}active{% endif %}">
-      <i class="fa-solid fa-robot me-2"></i>전략 관리
+      <i class="fa-solid fa-robot me-2"></i><span>전략 관리</span>
     </a>
     <a href="/orders/" class="{% if '/orders' in request.path %}active{% endif %}">
-      <i class="fa-solid fa-list me-2"></i>주문 내역
+      <i class="fa-solid fa-list me-2"></i><span>주문 내역</span>
     </a>
     <a href="/settings/" class="{% if '/settings' in request.path %}active{% endif %}">
-      <i class="fa-solid fa-gear me-2"></i>설정
+      <i class="fa-solid fa-gear me-2"></i><span>설정</span>
     </a>
   </nav>
   <main class="flex-grow-1 p-4">{% block content %}{% endblock %}</main>

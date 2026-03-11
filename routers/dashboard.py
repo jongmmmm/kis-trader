@@ -1,4 +1,5 @@
 from flask import Blueprint, render_template, jsonify, current_app, request
+from flask_login import login_required
 from kis_api import get_balance, get_current_price, get_index_price, get_volume_rank
 from models import Strategy
 
@@ -6,6 +7,7 @@ bp = Blueprint("dashboard", __name__)
 
 
 @bp.route("/")
+@login_required
 def index():
     return render_template("dashboard.html")
 
