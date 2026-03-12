@@ -204,6 +204,182 @@ def get_volume_rank(mode: str = "paper") -> list:
     return result
 
 
+def get_overseas_volume_rank(mode: str = "paper", excd: str = "NAS") -> list:
+    """해외주식 거래량 상위 종목 조회 — 주요 종목 시세를 가져와 거래량순 정렬"""
+    MAJOR_STOCKS = {
+        "NAS": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META",
+                "NFLX", "AVGO", "COST", "AMD", "QCOM", "INTC", "PYPL",
+                "ADBE", "CSCO", "PEP", "CMCSA", "TMUS", "INTU",
+                "AMAT", "ISRG", "MU", "LRCX", "MRVL", "PLTR", "COIN",
+                "MSTR", "SMCI", "ARM"],
+        "NYS": ["BRK.B", "JPM", "V", "UNH", "MA", "JNJ", "WMT", "PG",
+                "XOM", "HD", "BAC", "CVX", "KO", "MRK", "PFE",
+                "ABBV", "DIS", "NKE", "T", "VZ", "GM", "F", "BA",
+                "GS", "MS", "C", "WFC", "IBM", "GE", "CAT"],
+        "AMS": ["SPY", "QQQ", "IWM", "SOXL", "TQQQ", "SQQQ", "UVXY",
+                "XLF", "XLE", "XLK", "GLD", "SLV", "EEM", "VXX",
+                "ARKK"],
+    }
+    symbols = MAJOR_STOCKS.get(excd, MAJOR_STOCKS["NAS"])
+    result = []
+    for sym in symbols:
+        try:
+            data = get_overseas_current_price(sym, excd, mode)
+            if data["price"] > 0 and data["volume"] > 0:
+                data["stock_code"] = sym
+                data["stock_name"] = data.get("name", sym)
+                result.append(data)
+        except Exception:
+            continue
+    result.sort(key=lambda x: x["volume"], reverse=True)
+    return result[:30]
+
+
+# ─── 해외주식 API ────────────────────────────────────────────
+
+# 거래소 코드 매핑
+EXCHANGE_MAP = {
+    "NAS": "NASD",   # 나스닥
+    "NYS": "NYSE",   # 뉴욕
+    "AMS": "AMEX",   # 아멕스
+    "HKS": "SEHK",   # 홍콩
+    "SHS": "SHAA",   # 상해
+    "SZS": "SZAA",   # 심천
+    "TSE": "TKSE",   # 도쿄
+    "HNX": "HASE",   # 하노이
+    "HSX": "VNSE",   # 호치민
+}
+
+# 거래소별 tr_id (모의투자는 해외주식 미지원이므로 실전만)
+def _overseas_exchange_code(excd: str) -> str:
+    """거래소 약어를 KIS API 파라미터용으로 변환"""
+    return EXCHANGE_MAP.get(excd, excd)
+
+
+def get_overseas_current_price(stock_code: str, excd: str = "NAS", mode: str = "paper") -> dict:
+    """해외 현재가 조회"""
+    url = f"{_base_url(mode)}/uapi/overseas-price/v1/quotations/price"
+    params = {
+        "AUTH": "",
+        "EXCD": excd,
+        "SYMB": stock_code,
+    }
+    resp = requests.get(url, headers=_headers(mode, "HHDFS00000300"), params=params, timeout=10)
+    resp.raise_for_status()
+    output = resp.json().get("output", {})
+    return {
+        "price": float(output.get("last", 0)),
+        "change_rate": float(output.get("rate", 0)),
+        "change_val": float(output.get("diff", 0)),
+        "volume": int(float(output.get("tvol", 0))),
+        "high": float(output.get("high", 0)),
+        "low": float(output.get("low", 0)),
+        "open": float(output.get("open", 0)),
+        "name": output.get("name", ""),
+        "currency": output.get("curr", "USD"),
+        "exchange": excd,
+    }
+
+
+def get_overseas_daily_ohlcv(stock_code: str, excd: str = "NAS",
+                              mode: str = "paper", count: int = 100,
+                              period_code: str = "0") -> list:
+    """해외 일봉 조회 (period_code: 0=일, 1=주, 2=월)"""
+    url = f"{_base_url(mode)}/uapi/overseas-price/v1/quotations/dailyprice"
+    params = {
+        "AUTH": "",
+        "EXCD": excd,
+        "SYMB": stock_code,
+        "GUBN": period_code,
+        "BYMD": "",
+        "MODP": "1",
+    }
+    resp = requests.get(url, headers=_headers(mode, "HHDFS76240000"), params=params, timeout=15)
+    resp.raise_for_status()
+    output2 = resp.json().get("output2", [])
+    result = []
+    for row in output2[:count]:
+        if not row.get("xymd"):
+            continue
+        result.append({
+            "date": row.get("xymd", ""),
+            "open": float(row.get("open", 0)),
+            "high": float(row.get("high", 0)),
+            "low": float(row.get("low", 0)),
+            "close": float(row.get("clos", 0)),
+            "volume": int(float(row.get("tvol", 0))),
+        })
+    return result
+
+
+def get_overseas_balance(mode: str = "paper") -> list:
+    """해외 잔고 조회"""
+    cfg = current_app.config
+    _, _, account_no = _credentials(mode)
+    tr_id = "TTTS3012R" if mode == "real" else "VTTS3012R"
+    url = f"{_base_url(mode)}/uapi/overseas-stock/v1/trading/inquire-balance"
+    params = {
+        "CANO": account_no,
+        "ACNT_PRDT_CD": cfg["KIS_ACCOUNT_SUFFIX"],
+        "OVRS_EXCG_CD": "NASD",
+        "TR_CRCY_CD": "USD",
+        "CTX_AREA_FK200": "",
+        "CTX_AREA_NK200": "",
+    }
+    resp = requests.get(url, headers=_headers(mode, tr_id), params=params, timeout=10)
+    resp.raise_for_status()
+    output1 = resp.json().get("output1", [])
+    result = []
+    for row in output1:
+        qty = int(float(row.get("ovrs_cblc_qty", 0)))
+        if qty > 0:
+            result.append({
+                "stock_code": row.get("ovrs_pdno", ""),
+                "stock_name": row.get("ovrs_item_name", ""),
+                "exchange": row.get("ovrs_excg_cd", ""),
+                "quantity": qty,
+                "avg_price": float(row.get("pchs_avg_pric", 0)),
+                "current_price": float(row.get("now_pric2", 0)),
+                "eval_profit_loss": float(row.get("frcr_evlu_pfls_amt", 0)),
+                "profit_loss_rate": float(row.get("evlu_pfls_rt", 0)),
+                "currency": row.get("tr_crcy_cd", "USD"),
+            })
+    return result
+
+
+def place_overseas_order(stock_code: str, excd: str, order_type: str,
+                          price: float, quantity: int, mode: str = "paper") -> dict:
+    """해외 주문 실행"""
+    cfg = current_app.config
+    _, _, account_no = _credentials(mode)
+    ovrs_excg_cd = _overseas_exchange_code(excd)
+
+    if order_type == "buy":
+        tr_id = "VTTT1002U" if mode == "paper" else "TTTT1002U"
+    else:
+        tr_id = "VTTT1001U" if mode == "paper" else "TTTT1001U"
+
+    url = f"{_base_url(mode)}/uapi/overseas-stock/v1/trading/order"
+    body = {
+        "CANO": account_no,
+        "ACNT_PRDT_CD": cfg["KIS_ACCOUNT_SUFFIX"],
+        "OVRS_EXCG_CD": ovrs_excg_cd,
+        "PDNO": stock_code,
+        "ORD_DVSN": "00",
+        "ORD_QTY": str(quantity),
+        "OVRS_ORD_UNPR": str(price),
+    }
+    resp = requests.post(url, headers=_headers(mode, tr_id), json=body, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    output = data.get("output", {})
+    return {
+        "success": data.get("rt_cd") == "0",
+        "order_no": output.get("ODNO", ""),
+        "message": data.get("msg1", ""),
+    }
+
+
 def get_balance(mode: str = "paper") -> list:
     """잔고 조회"""
     cfg = current_app.config

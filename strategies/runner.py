@@ -3,7 +3,11 @@ import logging
 from datetime import datetime
 from db import db
 from models import Strategy, Order
-from kis_api import get_current_price, get_daily_ohlcv, get_balance, place_order
+from kis_api import (
+    get_current_price, get_daily_ohlcv, get_balance, place_order,
+    get_overseas_current_price, get_overseas_daily_ohlcv,
+    get_overseas_balance, place_overseas_order,
+)
 from .ma_strategy import MAStrategy
 from .rsi_macd import RsiMacdStrategy
 from .condition import ConditionStrategy
@@ -54,13 +58,21 @@ def _execute_strategy(strat: Strategy, balance_cache: dict):
         return
 
     engine = cls(strat.stock_code, strat.params or {})
-    ohlcv = get_daily_ohlcv(strat.stock_code, strat.mode, count=100)
-    current = get_current_price(strat.stock_code, strat.mode)
+
+    if strat.is_overseas:
+        ohlcv = get_overseas_daily_ohlcv(strat.stock_code, strat.exchange, strat.mode, count=100)
+        current = get_overseas_current_price(strat.stock_code, strat.exchange, strat.mode)
+    else:
+        ohlcv = get_daily_ohlcv(strat.stock_code, strat.mode, count=100)
+        current = get_current_price(strat.stock_code, strat.mode)
     price = current["price"]
 
-    cache_key = strat.mode
+    cache_key = strat.mode + ("_" + strat.exchange if strat.is_overseas else "")
     if cache_key not in balance_cache:
-        balance_cache[cache_key] = {r["stock_code"]: r for r in get_balance(strat.mode)}
+        if strat.is_overseas:
+            balance_cache[cache_key] = {r["stock_code"]: r for r in get_overseas_balance(strat.mode)}
+        else:
+            balance_cache[cache_key] = {r["stock_code"]: r for r in get_balance(strat.mode)}
     holding = balance_cache[cache_key].get(strat.stock_code)
 
     if holding:
@@ -78,7 +90,10 @@ def _execute_strategy(strat: Strategy, balance_cache: dict):
 
 
 def _place_and_record(strat: Strategy, order_type: str, price: float, qty: int):
-    result = place_order(strat.stock_code, order_type, int(price), qty, strat.mode)
+    if strat.is_overseas:
+        result = place_overseas_order(strat.stock_code, strat.exchange, order_type, price, qty, strat.mode)
+    else:
+        result = place_order(strat.stock_code, order_type, int(price), qty, strat.mode)
     order = Order(
         strategy_id=strat.id,
         stock_code=strat.stock_code,

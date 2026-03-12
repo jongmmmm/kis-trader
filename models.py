@@ -30,11 +30,16 @@ class Strategy(db.Model):
     name = db.Column(db.String(100), nullable=False)
     stock_code = db.Column(db.String(10), nullable=False)
     stock_name = db.Column(db.String(50), default="")
+    exchange = db.Column(db.String(10), default="")  # 빈값=국내, NAS/NYS/AMS/HKS/TSE 등=해외
     strategy_type = db.Column(db.String(20), nullable=False)  # ma|rsi_macd|condition|ml
     params = db.Column(db.JSON, default={})
     is_active = db.Column(db.Boolean, default=True)
     mode = db.Column(db.String(10), default="paper")  # paper|real
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def is_overseas(self):
+        return bool(self.exchange)
 
 class Order(db.Model):
     __tablename__ = "orders"

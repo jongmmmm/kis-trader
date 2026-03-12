@@ -27,19 +27,38 @@ function showAuctionPopup(data) {
     actionEl.className = "badge fs-6 px-3 py-2 bg-secondary";
   }
 
+  // 원형 게이지 (종합점수: -100 ~ +100 → 0~100%)
+  const score = data.ai_score || 0;
+  const scoreEl = document.getElementById("au-score");
+  scoreEl.textContent = (score > 0 ? "+" : "") + score.toFixed(1);
+  const scoreAbs = Math.min(Math.abs(score), 100);
+  const gaugeCircle = document.getElementById("au-gauge-circle");
+  const circumference = 327; // 2 * PI * 52
+  const gaugeOffset = circumference - (circumference * scoreAbs / 100);
+  gaugeCircle.style.strokeDashoffset = gaugeOffset;
+  if (score > 15) {
+    gaugeCircle.style.stroke = "#e74c3c";
+    scoreEl.style.color = "#e74c3c";
+  } else if (score < -15) {
+    gaugeCircle.style.stroke = "#3498db";
+    scoreEl.style.color = "#3498db";
+  } else {
+    gaugeCircle.style.stroke = "#f39c12";
+    scoreEl.style.color = "#f39c12";
+  }
+
   // 신뢰도 바
   const conf = data.ai_confidence || 0;
   const confBar = document.getElementById("au-confidence-bar");
   confBar.style.width = conf + "%";
-  confBar.className = "progress-bar " +
-    (conf >= 70 ? "bg-success" : conf >= 40 ? "bg-warning" : "bg-danger");
+  confBar.style.background = conf >= 70 ? "#27ae60" : conf >= 40 ? "#f39c12" : "#e74c3c";
   document.getElementById("au-confidence-val").textContent = conf + "%";
 
-  // 종합 점수
-  const score = data.ai_score || 0;
-  const scoreEl = document.getElementById("au-score");
-  scoreEl.textContent = (score > 0 ? "+" : "") + score.toFixed(1);
-  scoreEl.style.color = score > 0 ? "#e74c3c" : score < 0 ? "#3498db" : "#666";
+  // 판단 설명
+  const verdictText = document.getElementById("au-verdict-text");
+  const posCount = (data.ai_factors || []).filter(f => f.score > 5).length;
+  const negCount = (data.ai_factors || []).filter(f => f.score < -5).length;
+  verdictText.textContent = "긍정 " + posCount + "개 / 부정 " + negCount + "개 신호 감지";
 
   // 판단 박스 색상
   const verdictBox = document.getElementById("au-verdict-box");
@@ -51,20 +70,44 @@ function showAuctionPopup(data) {
     verdictBox.style.background = "#f8f9fa";
   }
 
-  // 팩터 테이블
-  const factorsTbody = document.getElementById("au-factors");
-  factorsTbody.innerHTML = "";
+  // 팩터 수평 바 차트
+  const factorsDiv = document.getElementById("au-factors");
+  factorsDiv.innerHTML = "";
   const factors = data.ai_factors || [];
+  const maxScore = Math.max(...factors.map(f => Math.abs(f.score)), 30);
+
   factors.forEach(function(f) {
-    const tr = document.createElement("tr");
-    const scoreColor = f.score > 10 ? "#e74c3c" : f.score < -10 ? "#3498db" : "#888";
-    const scoreIcon = f.score > 10 ? "\u25B2" : f.score < -10 ? "\u25BC" : "\u25CF";
-    tr.innerHTML =
-      '<td class="fw-bold">' + f.name + '</td>' +
-      '<td class="text-center fw-bold" style="color:' + scoreColor + '">' +
-        scoreIcon + ' ' + (f.score > 0 ? "+" : "") + f.score + '</td>' +
-      '<td class="text-muted">' + (f.reason || "-") + '</td>';
-    factorsTbody.appendChild(tr);
+    const pct = Math.min(Math.abs(f.score) / maxScore * 100, 100);
+    const isPositive = f.score > 0;
+    const barColor = f.score > 10 ? "#e74c3c" : f.score < -10 ? "#3498db" : "#adb5bd";
+    const emoji = f.score > 10 ? "🔴" : f.score < -10 ? "🔵" : "⚪";
+
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;";
+    row.innerHTML =
+      '<div style="width:70px;font-size:11px;font-weight:700;text-align:right;flex-shrink:0;color:#444;">' + f.name + '</div>' +
+      '<div style="flex:1;height:20px;background:#f1f3f5;border-radius:10px;overflow:hidden;position:relative;">' +
+        // 중앙선
+        '<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#ccc;z-index:1;"></div>' +
+        // 바
+        (isPositive
+          ? '<div style="position:absolute;left:50%;top:2px;bottom:2px;width:' + (pct/2) + '%;background:' + barColor + ';border-radius:0 8px 8px 0;transition:width 0.8s ease;"></div>'
+          : '<div style="position:absolute;right:50%;top:2px;bottom:2px;width:' + (pct/2) + '%;background:' + barColor + ';border-radius:8px 0 0 8px;transition:width 0.8s ease;"></div>'
+        ) +
+      '</div>' +
+      '<div style="width:40px;font-size:11px;font-weight:700;color:' + barColor + ';text-align:right;">' +
+        (f.score > 0 ? "+" : "") + f.score +
+      '</div>';
+
+    // 근거 툴팁 (호버 시 표시)
+    const tooltip = document.createElement("div");
+    tooltip.style.cssText = "font-size:10px;color:#888;padding-left:78px;margin-top:-2px;display:none;";
+    tooltip.textContent = f.reason || "";
+    row.addEventListener("mouseenter", function() { tooltip.style.display = "block"; });
+    row.addEventListener("mouseleave", function() { tooltip.style.display = "none"; });
+
+    factorsDiv.appendChild(row);
+    factorsDiv.appendChild(tooltip);
   });
 
   // AI 요약

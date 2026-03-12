@@ -103,10 +103,90 @@
   </div>
 </div>
 
-<!-- 보유 종목 -->
+<!-- ═══ 해외주식 섹션 ═══ -->
+<div class="d-flex justify-content-between align-items-center mt-5 mb-3">
+  <h4 class="fw-bold mb-0"><i class="fa-solid fa-globe me-2"></i>해외주식 시세</h4>
+  <span id="overseas-update" class="text-muted small"></span>
+</div>
+
+<!-- 해외 종목 추가 -->
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-body py-2">
+    <form id="add-overseas-form" class="d-flex align-items-center gap-2" onsubmit="return addOverseasStock(event)">
+      <i class="fa-solid fa-earth-americas text-muted"></i>
+      <select id="add-excd" class="form-select form-select-sm border-0" style="max-width:120px">
+        <option value="NAS">NASDAQ</option>
+        <option value="NYS">NYSE</option>
+        <option value="AMS">AMEX</option>
+        <option value="HKS">홍콩</option>
+        <option value="SHS">상해</option>
+        <option value="SZS">심천</option>
+        <option value="TSE">도쿄</option>
+        <option value="HNX">하노이</option>
+        <option value="HSX">호치민</option>
+      </select>
+      <input type="text" id="add-overseas-code" class="form-control form-control-sm border-0"
+             placeholder="티커 입력 (예: AAPL)" style="max-width:160px">
+      <button class="btn btn-sm btn-outline-primary" type="submit">추가</button>
+    </form>
+  </div>
+</div>
+
+<!-- 해외 종목 시세 테이블 -->
+<div class="card shadow-sm border-0">
+  <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+    <span><i class="fa-solid fa-chart-line me-2"></i>해외 종목 시세</span>
+    <span id="overseas-count" class="badge bg-secondary">0종목</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0" style="font-size:.88rem">
+        <thead class="table-light">
+          <tr>
+            <th style="width:60px">거래소</th>
+            <th style="width:90px">티커</th>
+            <th>종목명</th>
+            <th class="text-end">시가</th>
+            <th class="text-end">현재가</th>
+            <th class="text-end">전일대비(%)</th>
+            <th class="text-end">고가</th>
+            <th class="text-end">저가</th>
+            <th class="text-end">거래량</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody id="overseas-body">
+          <tr><td colspan="10" class="text-center text-muted py-4">해외 종목을 추가하세요</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 해외 보유 종목 -->
 <div class="card shadow-sm border-0 mt-4">
   <div class="card-header fw-bold">
-    <i class="fa-solid fa-wallet me-2"></i>보유 종목
+    <i class="fa-solid fa-sack-dollar me-2"></i>해외 보유 종목
+    <button class="btn btn-sm btn-outline-secondary float-end" onclick="loadOverseasBalance()">
+      <i class="fa-solid fa-rotate-right"></i>
+    </button>
+  </div>
+  <div class="card-body p-0">
+    <table class="table table-hover align-middle mb-0" style="font-size:.88rem">
+      <thead class="table-light">
+        <tr><th>거래소</th><th>티커</th><th>종목명</th><th class="text-end">수량</th><th class="text-end">평균단가</th><th class="text-end">현재가</th><th class="text-end">평가손익</th><th class="text-end">수익률</th><th class="text-end">통화</th></tr>
+      </thead>
+      <tbody id="overseas-balance-body">
+        <tr><td colspan="9" class="text-center text-muted py-4">로딩 중...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 국내 보유 종목 -->
+<div class="card shadow-sm border-0 mt-4">
+  <div class="card-header fw-bold">
+    <i class="fa-solid fa-wallet me-2"></i>국내 보유 종목
     <button class="btn btn-sm btn-outline-secondary float-end" onclick="loadBalance()">
       <i class="fa-solid fa-rotate-right"></i>
     </button>
@@ -128,11 +208,30 @@
 <!-- 오른쪽 실시간 등락 사이드바 -->
 <div class="col-lg-4">
   <div class="card shadow-sm border-0 sticky-sidebar">
-    <div class="card-header fw-bold d-flex justify-content-between align-items-center py-2">
-      <span><i class="fa-solid fa-fire me-1 text-danger"></i>거래량 TOP</span>
-      <span id="rank-update" class="text-muted" style="font-size:.65rem"></span>
+    <div class="card-header fw-bold py-2">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span><i class="fa-solid fa-fire me-1 text-danger"></i>거래량 TOP</span>
+        <span id="rank-update" class="text-muted" style="font-size:.65rem"></span>
+      </div>
+      <!-- 국내/해외 탭 -->
+      <ul class="nav nav-tabs nav-fill" id="rankTab" style="font-size:.78rem; margin-bottom:-8px;">
+        <li class="nav-item">
+          <a class="nav-link active py-1 px-2" id="tab-domestic" href="#" onclick="switchRankTab('domestic')">
+            <i class="fa-solid fa-flag me-1"></i>국내
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link py-1 px-2" id="tab-nas" href="#" onclick="switchRankTab('NAS')">NASDAQ</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link py-1 px-2" id="tab-nys" href="#" onclick="switchRankTab('NYS')">NYSE</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link py-1 px-2" id="tab-ams" href="#" onclick="switchRankTab('AMS')">AMEX</a>
+        </li>
+      </ul>
     </div>
-    <div class="card-body p-0" id="rank-container" style="max-height:calc(100vh - 140px); overflow-y:auto;">
+    <div class="card-body p-0" id="rank-container" style="max-height:calc(100vh - 200px); overflow-y:auto;">
       <div class="text-center text-muted py-4 small">로딩 중...</div>
     </div>
   </div>
@@ -185,6 +284,11 @@
   .rank-bar { height: 3px; border-radius: 2px; margin-top: 2px; transition: width .3s; }
   .rank-bar-up { background: linear-gradient(90deg, #e74c3c, #ff6b6b); }
   .rank-bar-down { background: linear-gradient(90deg, #3498db, #74b9ff); }
+
+  /* 랭킹 탭 */
+  #rankTab .nav-link { color: #666; border: none; border-bottom: 2px solid transparent; font-weight: 600; font-size: .72rem; }
+  #rankTab .nav-link.active { color: #e74c3c; border-bottom-color: #e74c3c; background: transparent; }
+  #rankTab .nav-link:hover { color: #e74c3c; }
 </style>
 <script>
 // 추가 종목 관리 (localStorage)
@@ -355,62 +459,243 @@ function loadBalance() {
 
 /* ---------- 거래량 TOP 사이드바 ---------- */
 let prevRankPrices = {};
+let currentRankTab = "domestic";
+let overseasRankCache = {};
+
+function switchRankTab(tab) {
+  currentRankTab = tab;
+  // 탭 UI 업데이트
+  document.querySelectorAll("#rankTab .nav-link").forEach(el => el.classList.remove("active"));
+  if (tab === "domestic") {
+    document.getElementById("tab-domestic").classList.add("active");
+    loadRanking();
+  } else {
+    document.getElementById("tab-" + tab.toLowerCase()).classList.add("active");
+    loadOverseasRanking(tab);
+  }
+}
+
+function renderRankItems(stocks, isOverseas) {
+  const container = document.getElementById("rank-container");
+  if (!stocks || !stocks.length) {
+    container.innerHTML = '<div class="text-center text-muted py-4 small">데이터 없음</div>';
+    return;
+  }
+
+  const maxVol = Math.max(...stocks.map(s => s.volume));
+  const fragment = document.createDocumentFragment();
+
+  stocks.forEach((s, i) => {
+    const cls = chgClass(s.change_rate);
+    const sign = s.change_rate > 0 ? "+" : "";
+    const arrow = s.change_rate > 0 ? "\u25B2" : s.change_rate < 0 ? "\u25BC" : "";
+    const barPct = maxVol > 0 ? Math.round((s.volume / maxVol) * 100) : 0;
+
+    const prevKey = "rank_" + s.stock_code + (isOverseas ? "_o" : "");
+    const flashed = prevRankPrices[prevKey] !== undefined && prevRankPrices[prevKey] !== s.price;
+    prevRankPrices[prevKey] = s.price;
+
+    const item = document.createElement("div");
+    item.className = "rank-item" + (flashed ? " flash" : "");
+    const rankCls = i < 1 ? "rank-1" : i < 2 ? "rank-2" : i < 3 ? "rank-3" : "rank-other";
+
+    const priceStr = isOverseas ? fmtO(s.price) : fmt(s.price);
+    const volStr = isOverseas ? fmtVolUS(s.volume) : fmtVol(s.volume);
+    const nameStr = s.stock_name || s.name || s.stock_code;
+
+    item.innerHTML =
+      '<div class="rank-num ' + rankCls + '">' + (i + 1) + '</div>' +
+      '<div class="rank-info">' +
+        '<div class="rank-name">' + nameStr + '</div>' +
+        '<div class="rank-code">' + s.stock_code + '</div>' +
+        '<div class="rank-bar ' + (s.change_rate >= 0 ? 'rank-bar-up' : 'rank-bar-down') + '" style="width:' + barPct + '%"></div>' +
+      '</div>' +
+      '<div class="rank-price">' +
+        '<div class="rank-price-val ' + cls + '">' + priceStr + '</div>' +
+        '<div class="rank-change ' + cls + '">' + arrow + ' ' + sign + fmtF(s.change_rate) + '%</div>' +
+        '<div class="rank-vol">' + volStr + '</div>' +
+      '</div>';
+
+    fragment.appendChild(item);
+  });
+
+  container.textContent = "";
+  container.appendChild(fragment);
+  document.getElementById("rank-update").textContent =
+    new Date().toLocaleTimeString("ko-KR");
+}
+
+// 해외 거래량 포맷 (영문 단위)
+function fmtVolUS(n) {
+  if (n >= 1000000000) return (n / 1000000000).toFixed(1) + "B";
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+  if (n >= 1000) return (n / 1000).toFixed(0) + "K";
+  return n.toLocaleString("en-US");
+}
 
 function loadRanking() {
+  if (currentRankTab !== "domestic") return;
   fetch("/api/market-ranking").then(r => r.json()).then(d => {
-    const container = document.getElementById("rank-container");
+    if (currentRankTab !== "domestic") return;
+    renderRankItems(d.stocks, false);
+  }).catch(() => {});
+}
+
+function loadOverseasRanking(excd) {
+  const container = document.getElementById("rank-container");
+  container.innerHTML = '<div class="text-center text-muted py-4 small"><i class="fa-solid fa-spinner fa-spin me-1"></i>로딩 중...</div>';
+  fetch("/api/overseas-ranking?excd=" + excd).then(r => r.json()).then(d => {
+    if (currentRankTab !== excd) return;
+    overseasRankCache[excd] = d.stocks;
+    renderRankItems(d.stocks, true);
+  }).catch(() => {
+    if (currentRankTab === excd) {
+      container.innerHTML = '<div class="text-center text-muted py-4 small">연결 실패</div>';
+    }
+  });
+}
+
+// 자동 갱신 — 현재 활성 탭에 따라 호출
+function autoRefreshRanking() {
+  if (currentRankTab === "domestic") {
+    loadRanking();
+  } else {
+    loadOverseasRanking(currentRankTab);
+  }
+}
+
+/* ========== 해외주식 ========== */
+
+// 해외 종목 관리 (localStorage)
+function getOverseasCodes() {
+  try { return JSON.parse(localStorage.getItem("kis_overseas_codes") || "[]"); }
+  catch { return []; }
+}
+function saveOverseasCodes(arr) {
+  localStorage.setItem("kis_overseas_codes", JSON.stringify(arr));
+}
+function addOverseasStock(e) {
+  e.preventDefault();
+  const code = document.getElementById("add-overseas-code").value.trim().toUpperCase();
+  const excd = document.getElementById("add-excd").value;
+  if (!code) return false;
+  const key = code + ":" + excd;
+  const arr = getOverseasCodes();
+  if (!arr.includes(key)) {
+    arr.push(key);
+    saveOverseasCodes(arr);
+    loadOverseasPrices();
+  }
+  document.getElementById("add-overseas-code").value = "";
+  return false;
+}
+function removeOverseas(key) {
+  const arr = getOverseasCodes().filter(c => c !== key);
+  saveOverseasCodes(arr);
+  loadOverseasPrices();
+}
+
+// 해외 가격 포맷 (소수점)
+function fmtO(n) { return n != null ? Number(n).toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2}) : "-"; }
+
+// 해외 종목 이전 가격
+let prevOverseasPrices = {};
+
+// 해외 종목 시세 로드
+function loadOverseasPrices() {
+  const codes = getOverseasCodes();
+  if (!codes.length) {
+    document.getElementById("overseas-body").innerHTML =
+      '<tr><td colspan="10" class="text-center text-muted py-4">해외 종목을 추가하세요</td></tr>';
+    document.getElementById("overseas-count").textContent = "0종목";
+    return;
+  }
+  const url = "/api/overseas-prices?stocks=" + codes.join(",");
+  fetch(url).then(r => r.json()).then(d => {
+    const tbody = document.getElementById("overseas-body");
     if (!d.stocks || !d.stocks.length) {
-      container.innerHTML = '<div class="text-center text-muted py-4 small">데이터 없음</div>';
+      tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">데이터 없음</td></tr>';
       return;
     }
-
-    const maxVol = Math.max(...d.stocks.map(s => s.volume));
+    document.getElementById("overseas-count").textContent = d.stocks.length + "종목";
     const fragment = document.createDocumentFragment();
-
-    d.stocks.forEach((s, i) => {
+    d.stocks.forEach(s => {
       const cls = chgClass(s.change_rate);
       const sign = s.change_rate > 0 ? "+" : "";
-      const arrow = s.change_rate > 0 ? "\u25B2" : s.change_rate < 0 ? "\u25BC" : "";
-      const barPct = maxVol > 0 ? Math.round((s.volume / maxVol) * 100) : 0;
+      const arrow = s.change_rate > 0 ? "arrow-up" : s.change_rate < 0 ? "arrow-down" : "";
+      const rowBg = s.change_rate > 0 ? "row-up" : s.change_rate < 0 ? "row-down" : "";
+      const key = s.stock_code + ":" + s.exchange;
+      const flashed = prevOverseasPrices[key] !== undefined && prevOverseasPrices[key] !== s.price;
+      prevOverseasPrices[key] = s.price;
 
-      const prevKey = "rank_" + s.stock_code;
-      const flashed = prevRankPrices[prevKey] !== undefined && prevRankPrices[prevKey] !== s.price;
-      prevRankPrices[prevKey] = s.price;
+      const excdLabel = {"NAS":"NASDAQ","NYS":"NYSE","AMS":"AMEX","HKS":"HK","SHS":"SHA","SZS":"SZA","TSE":"TSE","HNX":"HNX","HSX":"HSX"}[s.exchange] || s.exchange;
 
-      const item = document.createElement("div");
-      item.className = "rank-item" + (flashed ? " flash" : "");
-
-      const rankCls = i < 1 ? "rank-1" : i < 2 ? "rank-2" : i < 3 ? "rank-3" : "rank-other";
-
-      item.innerHTML =
-        '<div class="rank-num ' + rankCls + '">' + (i + 1) + '</div>' +
-        '<div class="rank-info">' +
-          '<div class="rank-name">' + s.stock_name + '</div>' +
-          '<div class="rank-code">' + s.stock_code + '</div>' +
-          '<div class="rank-bar ' + (s.change_rate >= 0 ? 'rank-bar-up' : 'rank-bar-down') + '" style="width:' + barPct + '%"></div>' +
-        '</div>' +
-        '<div class="rank-price">' +
-          '<div class="rank-price-val ' + cls + '">' + fmt(s.price) + '</div>' +
-          '<div class="rank-change ' + cls + '">' + arrow + ' ' + sign + fmtF(s.change_rate) + '%</div>' +
-          '<div class="rank-vol">' + fmtVol(s.volume) + '</div>' +
-        '</div>';
-
-      fragment.appendChild(item);
+      const tr = document.createElement("tr");
+      tr.className = (flashed ? "flash " : "") + rowBg;
+      tr.innerHTML =
+        '<td><span class="badge bg-info text-dark" style="font-size:.7rem">' + excdLabel + '</span></td>' +
+        '<td><code>' + s.stock_code + '</code></td>' +
+        '<td>' + (s.name || "-") + '</td>' +
+        '<td class="text-end fw-bold">' + fmtO(s.open) + '</td>' +
+        '<td class="text-end fw-bold ' + cls + ' ' + arrow + '">' + fmtO(s.price) + '</td>' +
+        '<td class="text-end ' + cls + '">' + sign + fmtF(s.change_rate) + '%</td>' +
+        '<td class="text-end">' + fmtO(s.high) + '</td>' +
+        '<td class="text-end">' + fmtO(s.low) + '</td>' +
+        '<td class="text-end">' + fmtVol(s.volume) + '</td>' +
+        '<td><i class="fa-solid fa-xmark remove-btn" onclick="removeOverseas(\'' + key + '\')"></i></td>';
+      fragment.appendChild(tr);
     });
-
-    container.textContent = "";
-    container.appendChild(fragment);
-    document.getElementById("rank-update").textContent =
-      new Date().toLocaleTimeString("ko-KR");
+    tbody.textContent = "";
+    tbody.appendChild(fragment);
+    document.getElementById("overseas-update").textContent =
+      "업데이트: " + new Date().toLocaleTimeString("ko-KR");
   }).catch(() => {});
+}
+
+// 해외 보유 종목
+function loadOverseasBalance() {
+  fetch("/api/overseas-balance").then(r => r.json()).then(d => {
+    const tbody = document.getElementById("overseas-balance-body");
+    tbody.textContent = "";
+    if (!d.balance || !d.balance.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = '<td colspan="9" class="text-center text-muted py-4">해외 보유 종목 없음</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+    d.balance.forEach(row => {
+      const pnl = row.eval_profit_loss || 0;
+      const cls = pnl > 0 ? "up" : pnl < 0 ? "down" : "flat";
+      const arrow = pnl > 0 ? "arrow-up" : pnl < 0 ? "arrow-down" : "";
+      const rowBg = pnl > 0 ? "row-up" : pnl < 0 ? "row-down" : "";
+      const sign = pnl > 0 ? "+" : "";
+      const tr = document.createElement("tr");
+      tr.className = rowBg;
+      tr.innerHTML =
+        '<td><span class="badge bg-info text-dark" style="font-size:.7rem">' + (row.exchange || "-") + '</span></td>' +
+        '<td><code>' + row.stock_code + '</code></td>' +
+        '<td>' + row.stock_name + '</td>' +
+        '<td class="text-end">' + row.quantity + '주</td>' +
+        '<td class="text-end">' + fmtO(row.avg_price) + '</td>' +
+        '<td class="text-end">' + fmtO(row.current_price) + '</td>' +
+        '<td class="text-end ' + cls + ' ' + arrow + '">' + sign + fmtO(pnl) + '</td>' +
+        '<td class="text-end ' + cls + '">' + sign + fmtF(row.profit_loss_rate) + '%</td>' +
+        '<td class="text-end"><span class="badge bg-secondary">' + (row.currency || "USD") + '</span></td>';
+      tbody.appendChild(tr);
+    });
+  });
 }
 
 // 초기 로드 + 갱신
 loadMarketPrices();
 loadBalance();
 loadRanking();
+loadOverseasPrices();
+loadOverseasBalance();
 setInterval(loadMarketPrices, 3000);
 setInterval(loadBalance, 30000);
-setInterval(loadRanking, 5000);
+setInterval(autoRefreshRanking, 3000);
+setInterval(loadOverseasPrices, 10000);
+setInterval(loadOverseasBalance, 60000);
 </script>
 {% endblock %}

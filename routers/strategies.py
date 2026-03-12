@@ -3,7 +3,10 @@ from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required
 from db import db
 from models import Strategy
-from kis_api import get_daily_ohlcv, get_current_price
+from kis_api import (
+    get_daily_ohlcv, get_current_price,
+    get_overseas_daily_ohlcv, get_overseas_current_price,
+)
 from strategies.ai_analyzer import analyze_stock
 
 bp = Blueprint("strategies", __name__, url_prefix="/strategies")
@@ -18,7 +21,8 @@ def list_strategies():
     items = Strategy.query.order_by(Strategy.created_at.desc()).all()
     return jsonify([{
         "id": s.id, "name": s.name, "stock_code": s.stock_code,
-        "stock_name": s.stock_name, "strategy_type": s.strategy_type,
+        "stock_name": s.stock_name, "exchange": s.exchange or "",
+        "strategy_type": s.strategy_type,
         "params": s.params, "is_active": s.is_active, "mode": s.mode,
     } for s in items])
 
@@ -28,6 +32,7 @@ def create_strategy():
     s = Strategy(
         name=d["name"], stock_code=d["stock_code"],
         stock_name=d.get("stock_name", ""),
+        exchange=d.get("exchange", ""),
         strategy_type=d["strategy_type"],
         params=d.get("params", {}),
         is_active=d.get("is_active", True),
@@ -41,7 +46,7 @@ def create_strategy():
 def update_strategy(sid):
     s = Strategy.query.get_or_404(sid)
     d = request.get_json()
-    for field in ("name", "stock_code", "stock_name", "strategy_type", "params", "is_active", "mode"):
+    for field in ("name", "stock_code", "stock_name", "exchange", "strategy_type", "params", "is_active", "mode"):
         if field in d:
             setattr(s, field, d[field])
     db.session.commit()
@@ -82,10 +87,16 @@ def strategy_chart_data(sid):
     cfg = period_map.get(period, period_map["month"])
 
     try:
-        raw = get_daily_ohlcv(s.stock_code, s.mode,
-                              count=cfg["count"],
-                              period_code=cfg["period_code"],
-                              start_date=cfg["start"].strftime("%Y%m%d"))
+        if s.is_overseas:
+            overseas_period = {"D": "0", "W": "1", "M": "2"}.get(cfg["period_code"], "0")
+            raw = get_overseas_daily_ohlcv(s.stock_code, s.exchange, s.mode,
+                                           count=cfg["count"],
+                                           period_code=overseas_period)
+        else:
+            raw = get_daily_ohlcv(s.stock_code, s.mode,
+                                  count=cfg["count"],
+                                  period_code=cfg["period_code"],
+                                  start_date=cfg["start"].strftime("%Y%m%d"))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -128,12 +139,17 @@ def strategy_chart_data(sid):
     df = df.fillna(0)
 
     # JSON 직렬화
+    is_overseas = s.is_overseas
     candles = []
     for _, r in df.iterrows():
+        o, h, l, c = r["open"], r["high"], r["low"], r["close"]
+        if not is_overseas:
+            o, h, l, c = int(o), int(h), int(l), int(c)
+        else:
+            o, h, l, c = round(float(o), 2), round(float(h), 2), round(float(l), 2), round(float(c), 2)
         candles.append({
             "time": r["date"].strftime("%Y-%m-%d"),
-            "open": int(r["open"]), "high": int(r["high"]),
-            "low": int(r["low"]), "close": int(r["close"]),
+            "open": o, "high": h, "low": l, "close": c,
             "volume": int(r["volume"]),
             "ma_short": round(r["ma_short"], 1),
             "ma_long": round(r["ma_long"], 1),
@@ -156,13 +172,389 @@ def strategy_chart_data(sid):
     })
 
 
+def _search_naver_news(query, date_str, max_results=3):
+    """Google News RSS (한국어) - 특정 날짜 전후 국내 뉴스 가져오기"""
+    import requests as req
+    from bs4 import BeautifulSoup
+    from datetime import datetime as dt, timedelta
+    from urllib.parse import quote
+    try:
+        target = dt.strptime(date_str, "%Y-%m-%d").date()
+        before = (target + timedelta(days=1)).strftime("%Y-%m-%d")
+        after = (target - timedelta(days=1)).strftime("%Y-%m-%d")
+        url = f"https://news.google.com/rss/search?q={quote(query)}+after:{after}+before:{before}&hl=ko&gl=KR&ceid=KR:ko"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = req.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(resp.content, "xml")
+        titles = []
+        for item in soup.find_all("item")[:max_results]:
+            t = item.find("title")
+            if t:
+                titles.append(t.get_text(strip=True))
+        return titles
+    except Exception:
+        return []
+
+
+def _search_google_news(query, date_str, max_results=3):
+    """Google News RSS 검색 (한국어) - 해외 주식 뉴스"""
+    import requests as req
+    from bs4 import BeautifulSoup
+    from datetime import datetime as dt, timedelta
+    from urllib.parse import quote
+    try:
+        target = dt.strptime(date_str, "%Y-%m-%d").date()
+        before = (target + timedelta(days=1)).strftime("%Y-%m-%d")
+        after = (target - timedelta(days=1)).strftime("%Y-%m-%d")
+        url = f"https://news.google.com/rss/search?q={quote(query)}+after:{after}+before:{before}&hl=ko&gl=KR&ceid=KR:ko"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = req.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(resp.content, "xml")
+        titles = []
+        for item in soup.find_all("item")[:max_results]:
+            t = item.find("title")
+            if t:
+                titles.append(t.get_text(strip=True))
+        return titles
+    except Exception:
+        return []
+
+
+# 뉴스 캐시 (메모리 기반, 서버 재시작 시 초기화)
+_news_cache = {}
+
+@bp.route("/api/strategies/<int:sid>/events")
+def strategy_events(sid):
+    """급등/급락(±3%) 구간을 감지하고 관련 뉴스 검색"""
+    s = Strategy.query.get_or_404(sid)
+    threshold = float(request.args.get("threshold", 3.0))
+    period = request.args.get("period", "month")
+
+    from datetime import date, timedelta
+    from dateutil.relativedelta import relativedelta
+    today = date.today()
+    period_start = {
+        "day": today - timedelta(days=60),
+        "month": today - relativedelta(months=3),
+        "year": today - relativedelta(years=1, months=2),
+        "5year": today - relativedelta(years=5, months=3),
+        "10year": today - relativedelta(years=10, months=6),
+    }.get(period, today - relativedelta(months=3))
+
+    try:
+        if s.is_overseas:
+            import yfinance as yf
+            ticker = yf.Ticker(s.stock_code)
+            hist = ticker.history(start=period_start.strftime("%Y-%m-%d"),
+                                 end=(today + timedelta(days=1)).strftime("%Y-%m-%d"))
+            if hist.empty:
+                return jsonify({"events": []})
+            hist = hist.reset_index()
+            hist["change_pct"] = hist["Close"].pct_change() * 100
+
+            events = []
+            for _, row in hist.iterrows():
+                chg = row.get("change_pct", 0)
+                if pd.isna(chg) or abs(chg) < threshold:
+                    continue
+                d = row["Date"]
+                date_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+
+                # 뉴스 검색 (캐시)
+                cache_key = f"{s.stock_code}_{date_str}"
+                if cache_key not in _news_cache:
+                    # 한국어 뉴스 검색: 티커 + 종목명
+                    query = f"{s.stock_code} {s.stock_name}" if s.stock_name else s.stock_code
+                    _news_cache[cache_key] = _search_google_news(query, date_str)
+                    # 결과 없으면 티커만으로 재검색
+                    if not _news_cache[cache_key]:
+                        _news_cache[cache_key] = _search_google_news(s.stock_code, date_str)
+
+                news = _news_cache[cache_key]
+                reason = " | ".join(news) if news else f"{'급등' if chg > 0 else '급락'} {chg:+.1f}%"
+                events.append({
+                    "time": date_str,
+                    "change_pct": round(float(chg), 2),
+                    "direction": "up" if chg > 0 else "down",
+                    "reason": reason,
+                    "news": news,
+                    "price": round(float(row["Close"]), 2),
+                })
+        else:
+            from pykrx import stock as pykrx_stock
+            start_str = period_start.strftime("%Y%m%d")
+            end_str = today.strftime("%Y%m%d")
+            df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, s.stock_code)
+            if df.empty:
+                return jsonify({"events": []})
+            df = df.reset_index()
+            df.columns = [c.strip() for c in df.columns]
+            close_col = "종가" if "종가" in df.columns else "Close"
+            date_col = "날짜" if "날짜" in df.columns else df.columns[0]
+            df["change_pct"] = df[close_col].pct_change() * 100
+
+            events = []
+            for _, row in df.iterrows():
+                chg = row.get("change_pct", 0)
+                if pd.isna(chg) or abs(chg) < threshold:
+                    continue
+                d = row[date_col]
+                date_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+
+                # 뉴스 검색 (캐시)
+                cache_key = f"{s.stock_code}_{date_str}"
+                if cache_key not in _news_cache:
+                    query = s.stock_name if s.stock_name else s.stock_code
+                    _news_cache[cache_key] = _search_naver_news(query, date_str)
+
+                news = _news_cache[cache_key]
+                vol = row.get("거래량", row.get("Volume", 0))
+                if news:
+                    reason = " | ".join(news)
+                else:
+                    reason = f"{'급등' if chg > 0 else '급락'} {chg:+.1f}% (거래량: {int(vol):,})"
+                events.append({
+                    "time": date_str,
+                    "change_pct": round(float(chg), 2),
+                    "direction": "up" if chg > 0 else "down",
+                    "reason": reason,
+                    "news": news,
+                    "price": int(row[close_col]),
+                })
+        return jsonify({"events": events})
+    except Exception as e:
+        return jsonify({"error": str(e), "events": []}), 500
+
+
+@bp.route("/api/strategies/<int:sid>/backtest")
+def backtest_strategy(sid):
+    """전략 백테스팅: 과거 데이터로 매매 시뮬레이션"""
+    from datetime import date, timedelta
+    from dateutil.relativedelta import relativedelta
+
+    s = Strategy.query.get_or_404(sid)
+    period = request.args.get("period", "year")
+    initial_capital = float(request.args.get("capital", 10000000))
+    commission_rate = 0.00015  # 0.015%
+
+    today = date.today()
+    period_map = {
+        "3month": today - relativedelta(months=3),
+        "6month": today - relativedelta(months=6),
+        "year":   today - relativedelta(years=1),
+        "3year":  today - relativedelta(years=3),
+        "5year":  today - relativedelta(years=5),
+    }
+    start_date = period_map.get(period, period_map["year"])
+
+    # OHLCV 데이터 가져오기
+    try:
+        if s.is_overseas:
+            import yfinance as yf
+            ticker = yf.Ticker(s.stock_code)
+            hist = ticker.history(start=start_date.strftime("%Y-%m-%d"),
+                                  end=(today + timedelta(days=1)).strftime("%Y-%m-%d"))
+            if hist.empty:
+                return jsonify({"error": "데이터 없음"}), 404
+            hist = hist.reset_index()
+            ohlcv_list = []
+            for _, row in hist.iterrows():
+                ohlcv_list.append({
+                    "date": row["Date"].strftime("%Y%m%d"),
+                    "open": round(float(row["Open"]), 2),
+                    "high": round(float(row["High"]), 2),
+                    "low": round(float(row["Low"]), 2),
+                    "close": round(float(row["Close"]), 2),
+                    "volume": int(row["Volume"]),
+                })
+        else:
+            from pykrx import stock as pykrx_stock
+            start_str = start_date.strftime("%Y%m%d")
+            end_str = today.strftime("%Y%m%d")
+            df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, s.stock_code)
+            if df.empty:
+                return jsonify({"error": "데이터 없음"}), 404
+            df = df.reset_index()
+            df.columns = [c.strip() for c in df.columns]
+            date_col = "날짜" if "날짜" in df.columns else df.columns[0]
+            open_col = "시가" if "시가" in df.columns else "Open"
+            high_col = "고가" if "고가" in df.columns else "High"
+            low_col = "저가" if "저가" in df.columns else "Low"
+            close_col = "종가" if "종가" in df.columns else "Close"
+            vol_col = "거래량" if "거래량" in df.columns else "Volume"
+            ohlcv_list = []
+            for _, row in df.iterrows():
+                d = row[date_col]
+                ohlcv_list.append({
+                    "date": d.strftime("%Y%m%d") if hasattr(d, "strftime") else str(d)[:10].replace("-", ""),
+                    "open": int(row[open_col]),
+                    "high": int(row[high_col]),
+                    "low": int(row[low_col]),
+                    "close": int(row[close_col]),
+                    "volume": int(row[vol_col]),
+                })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    if len(ohlcv_list) < 30:
+        return jsonify({"error": "데이터가 부족합니다 (최소 30일 필요)"}), 400
+
+    # 전략 엔진 생성
+    from strategies.runner import STRATEGY_MAP
+    cls = STRATEGY_MAP.get(s.strategy_type)
+    if cls is None:
+        return jsonify({"error": f"지원하지 않는 전략 유형: {s.strategy_type}"}), 400
+    engine = cls(s.stock_code, s.params or {})
+
+    # 시뮬레이션
+    cash = initial_capital
+    qty = engine.get_quantity()
+    holding = 0
+    avg_price = 0.0
+    trades = []
+    equity_curve = []
+    win_count = 0
+    loss_count = 0
+    max_equity = initial_capital
+    max_drawdown = 0.0
+    lookback = max(60, int((s.params or {}).get("long_period", 20)) + 5)
+
+    for i in range(lookback, len(ohlcv_list)):
+        window = ohlcv_list[max(0, i - 100):i + 1]
+        bar = ohlcv_list[i]
+        price = bar["close"]
+        bar_date = bar["date"]
+        date_str = f"{bar_date[:4]}-{bar_date[4:6]}-{bar_date[6:8]}"
+
+        current = {
+            "price": price,
+            "change_rate": ((price - ohlcv_list[i - 1]["close"]) / ohlcv_list[i - 1]["close"] * 100)
+                           if i > 0 else 0,
+            "volume": bar["volume"],
+            "high": bar["high"],
+            "low": bar["low"],
+            "open": bar["open"],
+        }
+
+        # 보유 중: 손절/익절 체크
+        if holding > 0:
+            if engine.check_stop_loss(avg_price, price):
+                sell_value = price * holding
+                commission = sell_value * commission_rate
+                cash += sell_value - commission
+                pnl = (price - avg_price) * holding - commission
+                trades.append({
+                    "time": date_str, "type": "sell", "price": price,
+                    "qty": holding, "reason": "손절",
+                    "pnl": round(pnl, 2),
+                })
+                if pnl >= 0:
+                    win_count += 1
+                else:
+                    loss_count += 1
+                holding = 0
+                avg_price = 0
+            elif engine.check_take_profit(avg_price, price):
+                sell_value = price * holding
+                commission = sell_value * commission_rate
+                cash += sell_value - commission
+                pnl = (price - avg_price) * holding - commission
+                trades.append({
+                    "time": date_str, "type": "sell", "price": price,
+                    "qty": holding, "reason": "익절",
+                    "pnl": round(pnl, 2),
+                })
+                win_count += 1
+                holding = 0
+                avg_price = 0
+            elif engine.should_sell(window, current):
+                sell_value = price * holding
+                commission = sell_value * commission_rate
+                cash += sell_value - commission
+                pnl = (price - avg_price) * holding - commission
+                trades.append({
+                    "time": date_str, "type": "sell", "price": price,
+                    "qty": holding, "reason": "시그널",
+                    "pnl": round(pnl, 2),
+                })
+                if pnl >= 0:
+                    win_count += 1
+                else:
+                    loss_count += 1
+                holding = 0
+                avg_price = 0
+
+        # 미보유: 매수 체크
+        elif holding == 0 and engine.should_buy(window, current):
+            buy_cost = price * qty
+            commission = buy_cost * commission_rate
+            if cash >= buy_cost + commission:
+                cash -= buy_cost + commission
+                holding = qty
+                avg_price = price
+                trades.append({
+                    "time": date_str, "type": "buy", "price": price,
+                    "qty": qty, "reason": "시그널",
+                })
+
+        # 자산 기록
+        equity = cash + (holding * price if holding > 0 else 0)
+        equity_curve.append({"time": date_str, "value": round(equity, 2)})
+        if equity > max_equity:
+            max_equity = equity
+        dd = (max_equity - equity) / max_equity * 100 if max_equity > 0 else 0
+        if dd > max_drawdown:
+            max_drawdown = dd
+
+    # 마지막 보유분 청산 (평가용)
+    final_price = ohlcv_list[-1]["close"]
+    final_equity = cash + (holding * final_price if holding > 0 else 0)
+    total_return = (final_equity - initial_capital) / initial_capital * 100
+    total_trades = len([t for t in trades if t["type"] == "sell"])
+
+    # 벤치마크 (단순 보유)
+    buy_hold_start = ohlcv_list[lookback]["close"]
+    buy_hold_end = ohlcv_list[-1]["close"]
+    buy_hold_qty = int(initial_capital / buy_hold_start) if buy_hold_start > 0 else 0
+    buy_hold_return = ((buy_hold_end - buy_hold_start) / buy_hold_start * 100) if buy_hold_start > 0 else 0
+
+    # 벤치마크 자산곡선
+    buy_hold_curve = []
+    for i in range(lookback, len(ohlcv_list)):
+        bar = ohlcv_list[i]
+        date_str = f"{bar['date'][:4]}-{bar['date'][4:6]}-{bar['date'][6:8]}"
+        bh_equity = buy_hold_qty * bar["close"] + (initial_capital - buy_hold_qty * buy_hold_start)
+        buy_hold_curve.append({"time": date_str, "value": round(bh_equity, 2)})
+
+    return jsonify({
+        "stock_code": s.stock_code,
+        "stock_name": s.stock_name,
+        "strategy_type": s.strategy_type,
+        "period": period,
+        "initial_capital": initial_capital,
+        "final_equity": round(final_equity, 2),
+        "total_return": round(total_return, 2),
+        "buy_hold_return": round(buy_hold_return, 2),
+        "total_trades": total_trades,
+        "win_rate": round(win_count / (win_count + loss_count) * 100, 1) if (win_count + loss_count) > 0 else 0,
+        "max_drawdown": round(max_drawdown, 2),
+        "trades": trades,
+        "equity_curve": equity_curve,
+        "buy_hold_curve": buy_hold_curve,
+    })
+
+
 @bp.route("/api/strategies/<int:sid>/ai-analyze")
 def ai_analyze(sid):
     """전략 종목에 대한 AI 분석 수행 (수동 테스트용)"""
     s = Strategy.query.get_or_404(sid)
     try:
-        ohlcv = get_daily_ohlcv(s.stock_code, s.mode, count=100)
-        current = get_current_price(s.stock_code, s.mode)
+        if s.is_overseas:
+            ohlcv = get_overseas_daily_ohlcv(s.stock_code, s.exchange, s.mode, count=100)
+            current = get_overseas_current_price(s.stock_code, s.exchange, s.mode)
+        else:
+            ohlcv = get_daily_ohlcv(s.stock_code, s.mode, count=100)
+            current = get_current_price(s.stock_code, s.mode)
         result = analyze_stock(ohlcv, current, s.params or {})
         result["stock_code"] = s.stock_code
         result["stock_name"] = s.stock_name

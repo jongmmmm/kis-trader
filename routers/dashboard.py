@@ -1,6 +1,9 @@
 from flask import Blueprint, render_template, jsonify, current_app, request
 from flask_login import login_required
-from kis_api import get_balance, get_current_price, get_index_price, get_volume_rank
+from kis_api import (
+    get_balance, get_current_price, get_index_price, get_volume_rank,
+    get_overseas_current_price, get_overseas_balance, get_overseas_volume_rank,
+)
 from models import Strategy
 
 bp = Blueprint("dashboard", __name__)
@@ -97,3 +100,59 @@ def stock_price(stock_code):
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+# ─── 해외주식 API ────────────────────────────────────────────
+
+@bp.route("/api/overseas-prices")
+def overseas_prices():
+    """해외 종목 시세 조회 (쿼리: stocks=AAPL:NAS,TSLA:NAS,7203:TSE)"""
+    mode = current_app.config.get("CURRENT_MODE", "paper")
+    stocks_param = request.args.get("stocks", "")
+    result = {"mode": mode, "stocks": []}
+
+    if not stocks_param:
+        return jsonify(result)
+
+    for item in stocks_param.split(","):
+        item = item.strip()
+        if ":" not in item:
+            continue
+        code, excd = item.split(":", 1)
+        try:
+            price_data = get_overseas_current_price(code, excd, mode)
+            price_data["stock_code"] = code
+            price_data["exchange"] = excd
+            result["stocks"].append(price_data)
+        except Exception:
+            result["stocks"].append({
+                "stock_code": code, "exchange": excd,
+                "name": "", "price": 0, "open": 0, "high": 0, "low": 0,
+                "change_rate": 0, "change_val": 0, "volume": 0,
+                "currency": "USD", "error": True,
+            })
+
+    return jsonify(result)
+
+
+@bp.route("/api/overseas-balance")
+def overseas_balance():
+    """해외 보유 종목 조회"""
+    mode = current_app.config.get("CURRENT_MODE", "paper")
+    try:
+        data = get_overseas_balance(mode)
+    except Exception:
+        data = []
+    return jsonify({"balance": data, "mode": mode})
+
+
+@bp.route("/api/overseas-ranking")
+def overseas_ranking():
+    """해외 거래량 상위 종목 조회"""
+    mode = current_app.config.get("CURRENT_MODE", "paper")
+    excd = request.args.get("excd", "NAS")
+    try:
+        data = get_overseas_volume_rank(mode, excd)
+    except Exception as e:
+        return jsonify({"error": str(e), "stocks": []}), 500
+    return jsonify({"stocks": data, "mode": mode, "exchange": excd})

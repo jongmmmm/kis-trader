@@ -170,6 +170,17 @@ def download_project():
     return "파일을 찾을 수 없습니다.", 404
 
 
+@bp.route("/download/ppt")
+@login_required
+def download_ppt():
+    """PPT 다운로드"""
+    import os
+    ppt_path = os.path.expanduser("~/Desktop/KIS_자동매매_시스템.pptx")
+    if os.path.exists(ppt_path):
+        return send_file(ppt_path, as_attachment=True, download_name="KIS_자동매매_시스템.pptx")
+    return "파일을 찾을 수 없습니다.", 404
+
+
 # ─── WebAuthn 지문인식 ───────────────────────────────────────
 
 @bp.route("/register-fingerprint")

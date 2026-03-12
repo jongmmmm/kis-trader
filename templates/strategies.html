@@ -11,7 +11,7 @@
   <div class="card-body p-0">
     <table class="table table-hover mb-0">
       <thead class="table-light">
-        <tr><th>이름</th><th>종목</th><th>전략유형</th><th>모드</th><th>상태</th><th>관리</th></tr>
+        <tr><th>이름</th><th>시장</th><th>종목</th><th>전략유형</th><th>모드</th><th>상태</th><th>관리</th></tr>
       </thead>
       <tbody id="strategy-body">
         <tr><td colspan="6" class="text-center text-muted py-4">로딩 중...</td></tr>
@@ -52,7 +52,8 @@
     </div>
     <div class="card-body p-2">
       <!-- 캔들스틱 + MA 차트 -->
-      <div id="candle-chart" style="height:400px;"></div>
+      <div id="candle-chart" style="height:400px;position:relative;">
+      </div>
       <!-- 거래량 차트 -->
       <div id="volume-chart" style="height:120px;"></div>
       <!-- 보조지표 영역 -->
@@ -87,7 +88,22 @@
           <input type="text" class="form-control" id="s-name" placeholder="삼성전자 MA전략">
         </div>
         <div class="mb-3">
-          <label class="form-label">종목코드</label>
+          <label class="form-label">시장</label>
+          <select class="form-select" id="s-exchange" onchange="updateMarketUI()">
+            <option value="">국내 (코스피/코스닥)</option>
+            <option value="NAS">NASDAQ (나스닥)</option>
+            <option value="NYS">NYSE (뉴욕)</option>
+            <option value="AMS">AMEX (아멕스)</option>
+            <option value="HKS">홍콩</option>
+            <option value="SHS">상해</option>
+            <option value="SZS">심천</option>
+            <option value="TSE">도쿄</option>
+            <option value="HNX">하노이</option>
+            <option value="HSX">호치민</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" id="code-label">종목코드</label>
           <input type="text" class="form-control" id="s-code" placeholder="005930">
         </div>
         <div class="mb-3">
@@ -123,6 +139,140 @@
     </div>
   </div>
 </div>
+<!-- 뉴스 툴팁 (fixed, body 레벨) -->
+<div id="chart-tooltip" style="display:none;position:fixed;z-index:9999;
+  background:#fff;border:1px solid #bbb;border-radius:10px;
+  padding:14px 18px;box-shadow:0 8px 30px rgba(0,0,0,0.22);
+  max-width:380px;min-width:220px;pointer-events:none;font-size:13px;line-height:1.5;"></div>
+
+<!-- 백테스팅 설정 모달 -->
+<div class="modal fade" id="backtestModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fa-solid fa-flask me-2"></i>백테스팅 설정</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-bold">종목</label>
+          <div id="bt-stock-name" class="form-control-plaintext fw-bold text-primary"></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">테스트 기간</label>
+          <select class="form-select" id="bt-period">
+            <option value="3month">3개월</option>
+            <option value="6month">6개월</option>
+            <option value="year" selected>1년</option>
+            <option value="3year">3년</option>
+            <option value="5year">5년</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">초기 자본금 (원)</label>
+          <input type="number" class="form-control" id="bt-capital" value="10000000">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+        <button type="button" class="btn btn-warning" onclick="runBacktest()">
+          <i class="fa-solid fa-play me-1"></i>백테스팅 실행
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 백테스팅 결과 영역 -->
+<div id="backtest-section" class="mt-4" style="display:none;">
+  <div class="card shadow-sm">
+    <div class="card-header">
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+          <i class="fa-solid fa-flask me-2"></i>
+          <span id="bt-result-title">백테스팅 결과</span>
+        </h5>
+        <button class="btn btn-sm btn-outline-danger" onclick="closeBacktest()">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    </div>
+    <div class="card-body">
+      <!-- 요약 통계 카드 -->
+      <div class="row g-3 mb-4" id="bt-stats-row">
+        <div class="col-6 col-md-2">
+          <div class="card border text-center h-100">
+            <div class="card-body py-2 px-1">
+              <div class="text-muted small">총 수익률</div>
+              <div class="fs-4 fw-bold" id="bt-total-return">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-2">
+          <div class="card border text-center h-100">
+            <div class="card-body py-2 px-1">
+              <div class="text-muted small">단순보유 수익률</div>
+              <div class="fs-4 fw-bold" id="bt-buyhold-return">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-2">
+          <div class="card border text-center h-100">
+            <div class="card-body py-2 px-1">
+              <div class="text-muted small">승률</div>
+              <div class="fs-4 fw-bold" id="bt-win-rate">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-2">
+          <div class="card border text-center h-100">
+            <div class="card-body py-2 px-1">
+              <div class="text-muted small">총 거래 횟수</div>
+              <div class="fs-4 fw-bold" id="bt-trade-count">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-2">
+          <div class="card border text-center h-100">
+            <div class="card-body py-2 px-1">
+              <div class="text-muted small">최대 낙폭</div>
+              <div class="fs-4 fw-bold text-danger" id="bt-max-dd">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-2">
+          <div class="card border text-center h-100">
+            <div class="card-body py-2 px-1">
+              <div class="text-muted small">최종 자산</div>
+              <div class="fs-5 fw-bold" id="bt-final-equity">-</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 자산곡선 차트 -->
+      <div class="card border mb-3">
+        <div class="card-header py-1 px-2">
+          <small class="fw-bold">자산 곡선 (전략 vs 단순보유)</small>
+        </div>
+        <div id="bt-equity-chart" style="height:300px;"></div>
+      </div>
+      <!-- 거래 내역 -->
+      <div class="card border">
+        <div class="card-header py-1 px-2">
+          <small class="fw-bold">거래 내역</small>
+        </div>
+        <div class="card-body p-0" style="max-height:300px;overflow-y:auto;">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light sticky-top">
+              <tr><th>날짜</th><th>유형</th><th>가격</th><th>수량</th><th>사유</th><th>손익</th></tr>
+            </thead>
+            <tbody id="bt-trades-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
@@ -139,6 +289,19 @@ function updateParamHint() {
   document.getElementById("param-hint").textContent = "기본 파라미터 예시가 자동 입력됐습니다.";
 }
 updateParamHint();
+
+function updateMarketUI() {
+  const ex = document.getElementById("s-exchange").value;
+  const codeInput = document.getElementById("s-code");
+  const codeLabel = document.getElementById("code-label");
+  if (ex) {
+    codeLabel.textContent = "티커";
+    codeInput.placeholder = ex === "NAS" ? "AAPL" : ex === "NYS" ? "JPM" : "SPY";
+  } else {
+    codeLabel.textContent = "종목코드";
+    codeInput.placeholder = "005930";
+  }
+}
 
 /* ---------- 기간 선택 ---------- */
 let currentPeriod = "month";
@@ -170,7 +333,7 @@ function loadStrategies() {
     if (!list.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 6; td.className = "text-center text-muted py-4";
+      td.colSpan = 7; td.className = "text-center text-muted py-4";
       td.textContent = "등록된 전략이 없습니다";
       tr.appendChild(td); tbody.appendChild(tr); return;
     }
@@ -185,7 +348,8 @@ function loadStrategies() {
       if (currentChartStrategyId === s.id) {
         tr.classList.add("table-active");
       }
-      [s.name, s.stock_code + " " + s.stock_name,
+      const exLabel = {"NAS":"NASDAQ","NYS":"NYSE","AMS":"AMEX","HKS":"홍콩","SHS":"상해","SZS":"심천","TSE":"도쿄","HNX":"하노이","HSX":"호치민"}[s.exchange] || "국내";
+      [s.name, exLabel, s.stock_code + " " + s.stock_name,
        typeLabel[s.strategy_type] || s.strategy_type,
        s.mode === "real" ? "실전" : "모의"].forEach(text => {
         const td = document.createElement("td");
@@ -202,6 +366,15 @@ function loadStrategies() {
       tdS.appendChild(badge); tr.appendChild(tdS);
       const tdB = document.createElement("td");
       tdB.className = "d-flex gap-1";
+      const btBtn = document.createElement("button");
+      btBtn.className = "btn btn-sm btn-outline-warning";
+      btBtn.innerHTML = '<i class="fa-solid fa-flask"></i>';
+      btBtn.title = "백테스팅";
+      btBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openBacktestModal(s.id, s.stock_name || s.stock_code);
+      });
+      tdB.appendChild(btBtn);
       const aiBtn = document.createElement("button");
       aiBtn.className = "btn btn-sm btn-outline-info";
       aiBtn.innerHTML = '<i class="fa-solid fa-brain"></i>';
@@ -235,6 +408,7 @@ function addStrategy() {
       name: document.getElementById("s-name").value,
       stock_code: document.getElementById("s-code").value,
       stock_name: document.getElementById("s-sname").value,
+      exchange: document.getElementById("s-exchange").value,
       strategy_type: document.getElementById("s-type").value,
       params, mode: document.getElementById("s-mode").value,
     }),
@@ -291,7 +465,7 @@ function openChart(strategyId, stockName) {
           .then(r => r.json())
           .then(d => { if (!d.error) renderCharts(d); })
           .catch(() => {});
-      }, 60000);
+      }, 3000);
     })
     .catch(err => {
       document.getElementById("chart-loading").style.display = "none";
@@ -360,6 +534,88 @@ function renderCharts(data) {
   ma60Series.setData(candles.filter(c => c.ma60 > 0).map(c => ({ time: c.time, value: c.ma60 })));
 
   candleChart.timeScale().fitContent();
+
+  /* --- 이벤트 마커 로드 (급등/급락) --- */
+  if (currentChartStrategyId) {
+    fetch("/strategies/api/strategies/" + currentChartStrategyId + "/events?period=" + currentPeriod + "&threshold=3")
+      .then(r => r.json())
+      .then(evtData => {
+        if (!evtData.events || !evtData.events.length) return;
+        window._chartEvents = {};
+        const markers = evtData.events.map(e => {
+          window._chartEvents[e.time] = e;
+          return {
+            time: e.time,
+            position: e.direction === "up" ? "aboveBar" : "belowBar",
+            color: e.direction === "up" ? "#e74c3c" : "#3498db",
+            shape: e.direction === "up" ? "arrowUp" : "arrowDown",
+            text: (e.direction === "up" ? "▲" : "▼") + Math.abs(e.change_pct).toFixed(1) + "%",
+          };
+        });
+        markers.sort((a, b) => a.time < b.time ? -1 : 1);
+        candleSeries.setMarkers(markers);
+      }).catch(() => {});
+  }
+
+  /* --- 이벤트 툴팁 --- */
+  const tooltipEl = document.getElementById("chart-tooltip");
+  if (tooltipEl) {
+    candleChart.subscribeCrosshairMove(param => {
+      if (!param.time || !window._chartEvents) {
+        tooltipEl.style.display = "none";
+        return;
+      }
+      // lightweight-charts v4: param.time은 {year, month, day} 객체 또는 문자열
+      let timeKey;
+      if (typeof param.time === 'object' && param.time.year) {
+        const y = param.time.year;
+        const m = String(param.time.month).padStart(2, '0');
+        const d = String(param.time.day).padStart(2, '0');
+        timeKey = `${y}-${m}-${d}`;
+      } else {
+        timeKey = String(param.time);
+      }
+      if (!window._chartEvents[timeKey]) {
+        tooltipEl.style.display = "none";
+        return;
+      }
+      const evt = window._chartEvents[timeKey];
+      const container = document.getElementById("candle-chart");
+      const rect = container.getBoundingClientRect();
+      const point = param.point;
+      const color = evt.direction === 'up' ? '#e74c3c' : '#3498db';
+      const arrow = evt.change_pct > 0 ? '▲' : '▼';
+      let newsHtml = '';
+      if (evt.news && evt.news.length > 0) {
+        newsHtml = '<div style="margin-top:6px;border-top:1px solid #eee;padding-top:6px">' +
+          '<div style="font-size:11px;color:#666;margin-bottom:4px;font-weight:bold">관련 뉴스</div>' +
+          evt.news.map((n, i) => `<div style="font-size:12px;line-height:1.5;margin-bottom:3px;padding-left:8px;border-left:2px solid ${color}">` +
+            `${i+1}. ${n}</div>`).join('') + '</div>';
+      } else {
+        newsHtml = `<div style="font-size:12px;line-height:1.4;color:#555">${evt.reason}</div>`;
+      }
+      tooltipEl.innerHTML = `
+        <div style="font-weight:bold;margin-bottom:6px;color:${color};font-size:14px">
+          ${evt.time} ${arrow} ${evt.change_pct > 0 ? '+' : ''}${evt.change_pct}%
+        </div>
+        ${newsHtml}
+        <div style="font-size:11px;color:#999;margin-top:6px;border-top:1px solid #eee;padding-top:4px">
+          종가: ${typeof evt.price === 'number' && evt.price > 1000 ? evt.price.toLocaleString() : evt.price}
+        </div>
+      `;
+      // fixed 좌표: chart container의 viewport 위치 + crosshair point
+      let left = rect.left + point.x + 20;
+      let top = rect.top + point.y - 10;
+      // 화면 밖으로 나가지 않도록
+      if (left + 390 > window.innerWidth) left = rect.left + point.x - 400;
+      if (top + 250 > window.innerHeight) top = window.innerHeight - 260;
+      if (top < 10) top = 10;
+      if (left < 10) left = 10;
+      tooltipEl.style.left = left + "px";
+      tooltipEl.style.top = top + "px";
+      tooltipEl.style.display = "block";
+    });
+  }
 
   /* --- 2. 거래량 --- */
   volumeChart = createChart("volume-chart", 120);
@@ -452,6 +708,136 @@ function runAiAnalysis(strategyId) {
       });
     })
     .catch(err => alert("분석 오류: " + err.message));
+}
+
+/* ---------- 백테스팅 ---------- */
+let _btStrategyId = null;
+let _btEquityChart = null;
+
+function openBacktestModal(strategyId, stockName) {
+  _btStrategyId = strategyId;
+  document.getElementById("bt-stock-name").textContent = stockName;
+  new bootstrap.Modal(document.getElementById("backtestModal")).show();
+}
+
+function closeBacktest() {
+  document.getElementById("backtest-section").style.display = "none";
+  if (_btEquityChart) { _btEquityChart.remove(); _btEquityChart = null; }
+}
+
+function runBacktest() {
+  if (!_btStrategyId) return;
+  const period = document.getElementById("bt-period").value;
+  const capital = document.getElementById("bt-capital").value;
+
+  bootstrap.Modal.getInstance(document.getElementById("backtestModal")).hide();
+
+  // 로딩 표시
+  const section = document.getElementById("backtest-section");
+  section.style.display = "block";
+  document.getElementById("bt-result-title").innerHTML =
+    '<i class="fa-solid fa-spinner fa-spin me-2"></i>백테스팅 실행 중...';
+
+  const url = "/strategies/api/strategies/" + _btStrategyId + "/backtest?period=" + period + "&capital=" + capital;
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        document.getElementById("bt-result-title").textContent = "백테스팅 실패: " + data.error;
+        return;
+      }
+      renderBacktestResult(data);
+    })
+    .catch(err => {
+      document.getElementById("bt-result-title").textContent = "백테스팅 오류: " + err.message;
+    });
+
+  section.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderBacktestResult(data) {
+  const periodLabel = {"3month":"3개월","6month":"6개월","year":"1년","3year":"3년","5year":"5년"}[data.period] || data.period;
+  document.getElementById("bt-result-title").textContent =
+    data.stock_name + " " + data.strategy_type.toUpperCase() + " 백테스팅 (" + periodLabel + ")";
+
+  // 통계 카드
+  const retEl = document.getElementById("bt-total-return");
+  retEl.textContent = (data.total_return > 0 ? "+" : "") + data.total_return.toFixed(1) + "%";
+  retEl.style.color = data.total_return >= 0 ? "#e74c3c" : "#3498db";
+
+  const bhEl = document.getElementById("bt-buyhold-return");
+  bhEl.textContent = (data.buy_hold_return > 0 ? "+" : "") + data.buy_hold_return.toFixed(1) + "%";
+  bhEl.style.color = data.buy_hold_return >= 0 ? "#e74c3c" : "#3498db";
+
+  const wrEl = document.getElementById("bt-win-rate");
+  wrEl.textContent = data.win_rate.toFixed(0) + "%";
+  wrEl.style.color = data.win_rate >= 50 ? "#27ae60" : "#e67e22";
+
+  document.getElementById("bt-trade-count").textContent = data.total_trades + "회";
+  document.getElementById("bt-max-dd").textContent = "-" + data.max_drawdown.toFixed(1) + "%";
+  document.getElementById("bt-final-equity").textContent = data.final_equity.toLocaleString() + "원";
+
+  // 자산곡선 차트
+  if (_btEquityChart) { _btEquityChart.remove(); _btEquityChart = null; }
+  const container = document.getElementById("bt-equity-chart");
+  container.innerHTML = "";
+  _btEquityChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 300,
+    layout: { background: { type: "solid", color: "#fff" }, textColor: "#333", fontSize: 11 },
+    grid: { vertLines: { color: "#f0f0f0" }, horzLines: { color: "#f0f0f0" } },
+    rightPriceScale: { borderColor: "#ddd" },
+    timeScale: { borderColor: "#ddd", timeVisible: false },
+    localization: { priceFormatter: p => p.toLocaleString("ko-KR") },
+  });
+
+  // 전략 자산곡선
+  const equitySeries = _btEquityChart.addLineSeries({
+    color: "#e74c3c", lineWidth: 2, title: "전략",
+  });
+  equitySeries.setData(data.equity_curve.map(p => ({ time: p.time, value: p.value })));
+
+  // 단순보유 자산곡선
+  const bhSeries = _btEquityChart.addLineSeries({
+    color: "#95a5a6", lineWidth: 1, lineStyle: 2, title: "단순보유",
+  });
+  bhSeries.setData(data.buy_hold_curve.map(p => ({ time: p.time, value: p.value })));
+
+  // 매매 마커
+  const markers = data.trades.map(t => ({
+    time: t.time,
+    position: t.type === "buy" ? "belowBar" : "aboveBar",
+    color: t.type === "buy" ? "#e74c3c" : "#3498db",
+    shape: t.type === "buy" ? "arrowUp" : "arrowDown",
+    text: t.type === "buy" ? "B" : "S",
+  }));
+  markers.sort((a, b) => a.time < b.time ? -1 : 1);
+  equitySeries.setMarkers(markers);
+
+  _btEquityChart.timeScale().fitContent();
+
+  // 리사이즈
+  new ResizeObserver(() => {
+    if (_btEquityChart) _btEquityChart.applyOptions({ width: container.clientWidth });
+  }).observe(container);
+
+  // 거래 내역 테이블
+  const tbody = document.getElementById("bt-trades-body");
+  tbody.innerHTML = "";
+  data.trades.forEach(t => {
+    const tr = document.createElement("tr");
+    const isBuy = t.type === "buy";
+    tr.innerHTML =
+      '<td>' + t.time + '</td>' +
+      '<td><span class="badge ' + (isBuy ? 'bg-danger' : 'bg-primary') + '">' +
+        (isBuy ? '매수' : '매도') + '</span></td>' +
+      '<td>' + (typeof t.price === 'number' && t.price > 1000 ? t.price.toLocaleString() : t.price) + '</td>' +
+      '<td>' + t.qty + '</td>' +
+      '<td><small>' + (t.reason || '') + '</small></td>' +
+      '<td style="color:' + (t.pnl >= 0 ? '#e74c3c' : '#3498db') + ';font-weight:bold">' +
+        (t.pnl !== undefined ? (t.pnl >= 0 ? '+' : '') + t.pnl.toLocaleString() : '-') + '</td>';
+    tbody.appendChild(tr);
+  });
 }
 
 loadStrategies();

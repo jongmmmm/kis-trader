@@ -13,7 +13,7 @@ def check_auction_and_alert(app):
     from datetime import datetime
     from db import db
     from models import Strategy, AuctionAlert
-    from kis_api import get_current_price, get_daily_ohlcv
+    from kis_api import get_current_price, get_daily_ohlcv, get_overseas_current_price, get_overseas_daily_ohlcv
     from routers.auction import broadcast_auction
 
     with app.app_context():
@@ -30,8 +30,12 @@ def check_auction_and_alert(app):
             if existing:
                 continue
             try:
-                current = get_current_price(strat.stock_code, strat.mode)
-                ohlcv = get_daily_ohlcv(strat.stock_code, strat.mode, count=100)
+                if strat.is_overseas:
+                    current = get_overseas_current_price(strat.stock_code, strat.exchange, strat.mode)
+                    ohlcv = get_overseas_daily_ohlcv(strat.stock_code, strat.exchange, strat.mode, count=100)
+                else:
+                    current = get_current_price(strat.stock_code, strat.mode)
+                    ohlcv = get_daily_ohlcv(strat.stock_code, strat.mode, count=100)
 
                 # RAG AI 분석 수행
                 analysis = analyze_stock(ohlcv, current, strat.params or {})
@@ -78,12 +82,15 @@ def expire_undecided_alerts(app):
 def retrain_ml_models(app):
     from db import db
     from models import Strategy
-    from kis_api import get_daily_ohlcv
+    from kis_api import get_daily_ohlcv, get_overseas_daily_ohlcv
     from strategies import train_model
     with app.app_context():
         for strat in Strategy.query.filter_by(strategy_type="ml", is_active=True).all():
             try:
-                ohlcv = get_daily_ohlcv(strat.stock_code, strat.mode, count=120)
+                if strat.is_overseas:
+                    ohlcv = get_overseas_daily_ohlcv(strat.stock_code, strat.exchange, strat.mode, count=120)
+                else:
+                    ohlcv = get_daily_ohlcv(strat.stock_code, strat.mode, count=120)
                 train_model(strat.stock_code, ohlcv)
                 logger.info(f"ML retrained: {strat.stock_code}")
             except Exception as e:
