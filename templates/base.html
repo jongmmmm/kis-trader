@@ -60,6 +60,9 @@
     <a href="/orders/" class="{% if '/orders' in request.path %}active{% endif %}">
       <i class="fa-solid fa-list me-2"></i><span>주문 내역</span>
     </a>
+    <a href="/react/chat" class="{% if '/react' in request.path %}active{% endif %}">
+      <i class="fa-solid fa-comments me-2"></i><span>AI 챗봇</span>
+    </a>
     <a href="/settings/" class="{% if '/settings' in request.path %}active{% endif %}">
       <i class="fa-solid fa-gear me-2"></i><span>설정</span>
     </a>
@@ -127,21 +130,63 @@
 
     <!-- 사용자 결정 버튼 -->
     <div class="d-flex gap-2">
-      <button class="btn btn-danger flex-fill py-2" onclick="auctionDecide('sell')">
-        <i class="fa-solid fa-arrow-down me-1"></i>매도 (돈 빼기)
+      <button class="btn btn-danger flex-fill py-2" onclick="openOrderModal('sell')">
+        <i class="fa-solid fa-arrow-down me-1"></i>매도
       </button>
-      <button class="btn btn-primary flex-fill py-2" onclick="auctionDecide('buy')">
-        <i class="fa-solid fa-arrow-up me-1"></i>매수 (돈 넣기)
+      <button class="btn btn-primary flex-fill py-2" onclick="openOrderModal('buy')">
+        <i class="fa-solid fa-arrow-up me-1"></i>매수
       </button>
       <button class="btn btn-secondary flex-fill py-2" onclick="document.getElementById('auction-overlay').classList.remove('show'); auctionDecide('pass');">
         <i class="fa-solid fa-hand me-1"></i>패스
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- 주문 설정 모달 (매수/매도 클릭 시 표시) -->
+<div id="order-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:10000; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:16px; padding:28px; min-width:380px; max-width:440px; box-shadow:0 8px 32px rgba(0,0,0,.3);">
+    <h5 class="fw-bold mb-3" id="order-config-title">
+      <i class="fa-solid fa-cart-shopping me-2"></i>주문 설정
+    </h5>
+    <div class="mb-3 p-2 rounded text-center" style="background:#f8f9fa;">
+      <span class="fw-bold" id="order-stock-info"></span>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-12">
+        <label class="form-label small fw-bold">주문 유형</label>
+        <select class="form-select" id="order-type-select">
+          <option value="limit">지정가</option>
+          <option value="market">시장가</option>
+        </select>
+      </div>
+      <div class="col-6">
+        <label class="form-label small fw-bold">가격 (원)</label>
+        <input type="number" class="form-control" id="order-price-input" min="0" step="100">
+      </div>
+      <div class="col-6">
+        <label class="form-label small fw-bold">수량 (주)</label>
+        <input type="number" class="form-control" id="order-qty-input" min="1" value="1">
+      </div>
+    </div>
+    <div class="mb-4 p-3 rounded text-center" style="background:#f0f4ff; border:1px solid #d0d9f0;">
+      <span class="text-muted">예상 주문 금액</span><br>
+      <span class="fw-bold fs-4" id="order-total">0</span><span class="text-muted">원</span>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn flex-fill py-2 fw-bold" id="order-confirm-btn" onclick="confirmOrder()">
+        <i class="fa-solid fa-check me-1"></i>주문 실행
+      </button>
+      <button class="btn btn-outline-secondary flex-fill py-2" onclick="closeOrderModal()">
+        취소
       </button>
     </div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="/static/js/auction.js?v=2"></script>
+<script src="/static/js/auction.js?v=20260401"></script>
 <script>
   fetch("/api/settings/mode").then(r => r.json()).then(d => {
     const b = document.getElementById("mode-badge");

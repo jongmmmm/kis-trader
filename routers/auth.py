@@ -313,3 +313,73 @@ def webauthn_login_verify():
 
     login_user(user, remember=True)
     return jsonify({"success": True, "msg": "로그인 성공"})
+
+
+# ─── React SPA용 JSON API ───────────────────────────────────
+
+@bp.route("/api/auth/login", methods=["POST"])
+def api_login():
+    data = request.get_json()
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    remember = data.get("remember", False)
+    user = User.query.filter_by(username=username).first()
+    if user and user.check_password(password):
+        login_user(user, remember=remember)
+        return jsonify({"success": True, "user": {"name": user.name, "username": user.username}})
+    return jsonify({"success": False, "msg": "아이디 또는 비밀번호가 올바르지 않습니다."}), 401
+
+
+@bp.route("/api/auth/me")
+def api_me():
+    if current_user.is_authenticated:
+        return jsonify({"authenticated": True, "user": {"name": current_user.name, "username": current_user.username}})
+    return jsonify({"authenticated": False})
+
+
+@bp.route("/api/auth/signup", methods=["POST"])
+def api_signup():
+    data = request.get_json()
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    password2 = data.get("password2", "")
+    name = data.get("name", "").strip()
+    phone = data.get("phone", "").strip()
+    email = data.get("email", "")
+    birth_date = data.get("birth_date", "")
+    login_method = data.get("login_method", "password")
+
+    errors = []
+    if not username or len(username) < 6 or len(username) > 20:
+        errors.append("아이디는 6~20자로 입력해주세요.")
+    if User.query.filter_by(username=username).first():
+        errors.append("이미 사용 중인 아이디입니다.")
+    if len(password) < 8 or len(password) > 20:
+        errors.append("비밀번호는 8~20자로 입력해주세요.")
+    if not re.search(r'[A-Za-z]', password) or not re.search(r'\d', password) or not re.search(r'[!@#$%^&*(),.?\":{}|<>]', password):
+        errors.append("비밀번호는 문자, 숫자, 특수문자를 포함해야 합니다.")
+    if password != password2:
+        errors.append("비밀번호가 일치하지 않습니다.")
+    if not name:
+        errors.append("이름을 입력해주세요.")
+
+    if errors:
+        return jsonify({"success": False, "errors": errors}), 400
+
+    user = User(username=username, name=name, phone=phone, email=email,
+                 birth_date=birth_date, login_method=login_method)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+
+    if login_method == "webauthn":
+        login_user(user)
+        return jsonify({"success": True, "redirect": "/register-fingerprint"})
+
+    return jsonify({"success": True, "redirect": "/login"})
+
+
+@bp.route("/api/auth/logout", methods=["POST"])
+def api_logout():
+    logout_user()
+    return jsonify({"success": True})

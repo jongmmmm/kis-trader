@@ -102,16 +102,41 @@ def decide(alert_id: int):
     if decision in ("buy", "sell"):
         from kis_api import place_order
         from models import Strategy
+        from routers.esg import _check_invest_limit, create_audit_log
+        from esg_data import get_esg
+
         strat = Strategy.query.get(alert.strategy_id)
         mode = strat.mode if strat else "paper"
+
+        # 사용자가 설정한 가격/수량 우선, 없으면 AI 추천값
+        order_price = data.get("price", alert.suggested_price)
+        order_qty = data.get("quantity", alert.suggested_qty)
+        order_price = int(order_price) if order_price else int(alert.suggested_price)
+        order_qty = int(order_qty) if order_qty else alert.suggested_qty
+
+        # 투자 한도 + ESG 필터 체크 (매수만)
+        if decision == "buy":
+            limit_check = _check_invest_limit(order_price * order_qty, alert.stock_code)
+            if not limit_check["allowed"]:
+                esg = get_esg(alert.stock_code)
+                create_audit_log(
+                    action="blocked", stock_code=alert.stock_code,
+                    stock_name=alert.stock_name, price=order_price,
+                    quantity=order_qty, mode=mode,
+                    reason=limit_check["reason"],
+                    ai_score=alert.ai_score, ai_summary=alert.ai_summary,
+                    esg_grade=esg.get("total_grade", ""),
+                )
+                return jsonify({"message": f"주문 차단: {limit_check['reason']}"}), 400
+
         result = place_order(alert.stock_code, decision,
-                             int(alert.suggested_price), alert.suggested_qty, mode)
+                             order_price, order_qty, mode)
         order = Order(
             strategy_id=alert.strategy_id,
             stock_code=alert.stock_code,
             order_type=decision,
-            price=alert.suggested_price,
-            quantity=alert.suggested_qty,
+            price=order_price,
+            quantity=order_qty,
             status="submitted" if result["success"] else "pending",
             trigger="auction_manual",
             mode=mode,
@@ -119,5 +144,20 @@ def decide(alert_id: int):
         )
         db.session.add(order)
         db.session.commit()
+
+        # 감사 로그 기록
+        esg = get_esg(alert.stock_code)
+        create_audit_log(
+            order=order, action=decision,
+            stock_code=alert.stock_code, stock_name=alert.stock_name,
+            price=order_price, quantity=order_qty, mode=mode,
+            reason=f"AI 분석 기반 {decision} (점수: {alert.ai_score})",
+            ai_score=alert.ai_score, ai_summary=alert.ai_summary,
+            esg_grade=esg.get("total_grade", ""),
+        )
+
+        price_text = "시장가" if order_price == 0 else f"{order_price:,}원"
+        label = "매수" if decision == "buy" else "매도"
+        return jsonify({"message": f"{label} 주문 완료! {alert.stock_code} {order_qty}주 × {price_text}"})
 
     return jsonify({"message": f"{decision} 처리 완료"})

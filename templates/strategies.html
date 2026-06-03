@@ -692,20 +692,25 @@ function runAiAnalysis(strategyId) {
     .then(r => r.json())
     .then(data => {
       if (data.error) { alert("분석 실패: " + data.error); return; }
-      // auction popup 형식으로 표시
-      showAuctionPopup({
-        id: null,
-        stock_code: data.stock_code,
-        stock_name: data.stock_name,
-        suggested_action: data.action,
-        suggested_price: data.price,
-        suggested_qty: 0,
-        ai_confidence: data.confidence,
-        ai_score: data.total_score,
-        ai_summary: data.summary,
-        ai_factors: data.factors,
-        expires_at: new Date(Date.now() + 600000).toISOString(),
-      });
+      // auction popup 형식으로 표시 (alert_id 포함 → 매수/매도 가능)
+      try {
+        showAuctionPopup({
+          id: data.id,
+          stock_code: data.stock_code,
+          stock_name: data.stock_name,
+          suggested_action: data.action,
+          suggested_price: data.price,
+          suggested_qty: data.suggested_qty || 1,
+          ai_confidence: data.confidence,
+          ai_score: data.total_score,
+          ai_summary: data.summary,
+          ai_factors: data.factors,
+          expires_at: new Date(Date.now() + 600000).toISOString(),
+        });
+      } catch(e) {
+        alert("팝업 표시 오류: " + e.message);
+        console.error("showAuctionPopup error:", e);
+      }
     })
     .catch(err => alert("분석 오류: " + err.message));
 }
@@ -738,9 +743,10 @@ function runBacktest() {
   document.getElementById("bt-result-title").innerHTML =
     '<i class="fa-solid fa-spinner fa-spin me-2"></i>백테스팅 실행 중...';
 
-  const url = "/strategies/api/strategies/" + _btStrategyId + "/backtest?period=" + period + "&capital=" + capital;
+  const cleanCapital = String(capital).replace(/,/g, "").trim() || "10000000";
+  const url = "/strategies/api/strategies/" + _btStrategyId + "/backtest?period=" + period + "&capital=" + cleanCapital;
   fetch(url)
-    .then(r => r.json())
+    .then(r => { if (!r.ok) return r.json().catch(() => ({error: "서버 오류 (HTTP " + r.status + ")"})); return r.json(); })
     .then(data => {
       if (data.error) {
         document.getElementById("bt-result-title").textContent = "백테스팅 실패: " + data.error;

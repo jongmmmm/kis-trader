@@ -1,8 +1,9 @@
 import pandas as pd
+from datetime import datetime, timedelta
 from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required
 from db import db
-from models import Strategy
+from models import Strategy, AuctionAlert
 from kis_api import (
     get_daily_ohlcv, get_current_price,
     get_overseas_daily_ohlcv, get_overseas_current_price,
@@ -172,49 +173,70 @@ def strategy_chart_data(sid):
     })
 
 
-def _search_naver_news(query, date_str, max_results=3):
-    """Google News RSS (한국어) - 특정 날짜 전후 국내 뉴스 가져오기"""
+def _search_naver_news(query, date_str, max_results=3, day_range=1):
+    """네이버 뉴스 검색 - 국내 주식 뉴스"""
     import requests as req
     from bs4 import BeautifulSoup
     from datetime import datetime as dt, timedelta
     from urllib.parse import quote
     try:
         target = dt.strptime(date_str, "%Y-%m-%d").date()
-        before = (target + timedelta(days=1)).strftime("%Y-%m-%d")
-        after = (target - timedelta(days=1)).strftime("%Y-%m-%d")
-        url = f"https://news.google.com/rss/search?q={quote(query)}+after:{after}+before:{before}&hl=ko&gl=KR&ceid=KR:ko"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = req.get(url, headers=headers, timeout=5)
-        soup = BeautifulSoup(resp.content, "xml")
+        ds = (target - timedelta(days=day_range)).strftime("%Y.%m.%d")
+        de = (target + timedelta(days=day_range)).strftime("%Y.%m.%d")
+        url = f"https://search.naver.com/search.naver?where=news&query={quote(query)}&sort=1&ds={ds}&de={de}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        resp = req.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(resp.text, "html.parser")
         titles = []
-        for item in soup.find_all("item")[:max_results]:
-            t = item.find("title")
-            if t:
-                titles.append(t.get_text(strip=True))
+        for a in soup.select("a.news_tit")[:max_results]:
+            titles.append(a.get_text(strip=True))
+        if not titles:
+            seen = set()
+            for a in soup.find_all("a"):
+                cls = " ".join(a.get("class", []))
+                if "fender-ui" not in cls:
+                    continue
+                text = a.get_text(strip=True)
+                if 15 < len(text) < 80 and text not in seen:
+                    seen.add(text)
+                    titles.append(text)
+                    if len(titles) >= max_results:
+                        break
         return titles
     except Exception:
         return []
 
 
-def _search_google_news(query, date_str, max_results=3):
-    """Google News RSS 검색 (한국어) - 해외 주식 뉴스"""
+def _search_yahoo_news(query, date_str, max_results=3, day_range=1):
+    """Yahoo(Bing) 뉴스 검색 - 해외 주식 뉴스"""
     import requests as req
     from bs4 import BeautifulSoup
     from datetime import datetime as dt, timedelta
     from urllib.parse import quote
     try:
         target = dt.strptime(date_str, "%Y-%m-%d").date()
-        before = (target + timedelta(days=1)).strftime("%Y-%m-%d")
-        after = (target - timedelta(days=1)).strftime("%Y-%m-%d")
-        url = f"https://news.google.com/rss/search?q={quote(query)}+after:{after}+before:{before}&hl=ko&gl=KR&ceid=KR:ko"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = req.get(url, headers=headers, timeout=5)
-        soup = BeautifulSoup(resp.content, "xml")
+        ds = (target - timedelta(days=day_range)).strftime("%Y-%m-%d")
+        de = (target + timedelta(days=day_range)).strftime("%Y-%m-%d")
+        # Bing News 한국어 날짜 필터 검색
+        date_filter = f"ex1%3a%22ez5_{ds}..{de}%22"
+        url = f"https://www.bing.com/news/search?q={quote(query)}&qft={date_filter}&setlang=ko&cc=KR&form=PTFNR"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        resp = req.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(resp.text, "html.parser")
         titles = []
-        for item in soup.find_all("item")[:max_results]:
-            t = item.find("title")
-            if t:
-                titles.append(t.get_text(strip=True))
+        # Bing News 제목 셀렉터
+        for a in soup.select("a.title")[:max_results]:
+            text = a.get_text(strip=True)
+            if text:
+                titles.append(text)
+        # 대체 셀렉터
+        if not titles:
+            for a in soup.find_all("a"):
+                text = a.get_text(strip=True)
+                if len(text) > 20 and any(k.lower() in text.lower() for k in query.split()[:2]):
+                    titles.append(text[:80])
+                    if len(titles) >= max_results:
+                        break
         return titles
     except Exception:
         return []
@@ -227,8 +249,14 @@ _news_cache = {}
 def strategy_events(sid):
     """급등/급락(±3%) 구간을 감지하고 관련 뉴스 검색"""
     s = Strategy.query.get_or_404(sid)
-    threshold = float(request.args.get("threshold", 3.0))
     period = request.args.get("period", "month")
+
+    # 기간별 기본 threshold: 장기일수록 큰 변동만 표시
+    default_thresholds = {
+        "day": 3.0, "month": 3.0, "year": 4.0, "5year": 6.0, "10year": 8.0,
+    }
+    threshold = float(request.args.get("threshold", default_thresholds.get(period, 3.0)))
+    max_events = {"day": 20, "month": 30, "year": 30, "5year": 30, "10year": 30}.get(period, 30)
 
     from datetime import date, timedelta
     from dateutil.relativedelta import relativedelta
@@ -249,36 +277,57 @@ def strategy_events(sid):
                                  end=(today + timedelta(days=1)).strftime("%Y-%m-%d"))
             if hist.empty:
                 return jsonify({"events": []})
+            # 5year/10year는 주봉/월봉으로 리샘플링 (차트와 동일)
+            resample_map = {"5year": "W", "10year": "ME"}
+            if period in resample_map:
+                hist = hist.resample(resample_map[period]).agg({
+                    "Open": "first", "High": "max", "Low": "min",
+                    "Close": "last", "Volume": "sum"
+                }).dropna()
             hist = hist.reset_index()
             hist["change_pct"] = hist["Close"].pct_change() * 100
 
-            events = []
+            # 1단계: threshold 넘는 이벤트 후보 수집 (뉴스 검색 없이)
+            candidates = []
             for _, row in hist.iterrows():
                 chg = row.get("change_pct", 0)
                 if pd.isna(chg) or abs(chg) < threshold:
                     continue
                 d = row["Date"]
                 date_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+                candidates.append({
+                    "date_str": date_str,
+                    "chg": float(chg),
+                    "close": round(float(row["Close"]), 2),
+                })
 
-                # 뉴스 검색 (캐시)
+            # 2단계: 변동폭 큰 순으로 상위 max_events개만 선택
+            candidates.sort(key=lambda x: abs(x["chg"]), reverse=True)
+            candidates = candidates[:max_events]
+            candidates.sort(key=lambda x: x["date_str"])  # 시간순 정렬
+
+            # 3단계: 선택된 이벤트에 대해서만 뉴스 검색 (해외: Yahoo/Bing)
+            day_range = {"day": 1, "month": 1, "year": 3, "5year": 7, "10year": 14}.get(period, 1)
+            events = []
+            for c in candidates:
+                date_str = c["date_str"]
+                chg = c["chg"]
                 cache_key = f"{s.stock_code}_{date_str}"
                 if cache_key not in _news_cache:
-                    # 한국어 뉴스 검색: 티커 + 종목명
-                    query = f"{s.stock_code} {s.stock_name}" if s.stock_name else s.stock_code
-                    _news_cache[cache_key] = _search_google_news(query, date_str)
-                    # 결과 없으면 티커만으로 재검색
+                    query = f"{s.stock_code} {s.stock_name} 주가" if s.stock_name else f"{s.stock_code} 주가"
+                    _news_cache[cache_key] = _search_yahoo_news(query, date_str, day_range=day_range)
                     if not _news_cache[cache_key]:
-                        _news_cache[cache_key] = _search_google_news(s.stock_code, date_str)
+                        _news_cache[cache_key] = _search_yahoo_news(f"{s.stock_code} 주가", date_str, day_range=day_range)
 
                 news = _news_cache[cache_key]
                 reason = " | ".join(news) if news else f"{'급등' if chg > 0 else '급락'} {chg:+.1f}%"
                 events.append({
                     "time": date_str,
-                    "change_pct": round(float(chg), 2),
+                    "change_pct": round(chg, 2),
                     "direction": "up" if chg > 0 else "down",
                     "reason": reason,
                     "news": news,
-                    "price": round(float(row["Close"]), 2),
+                    "price": c["close"],
                 })
         else:
             from pykrx import stock as pykrx_stock
@@ -287,39 +336,70 @@ def strategy_events(sid):
             df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, s.stock_code)
             if df.empty:
                 return jsonify({"events": []})
+            # 5year/10year는 주봉/월봉으로 리샘플링
+            resample_map = {"5year": "W", "10year": "ME"}
+            if period in resample_map:
+                df.index = pd.to_datetime(df.index)
+                cols = df.columns.tolist()
+                close_c = "종가" if "종가" in cols else "Close"
+                open_c = "시가" if "시가" in cols else "Open"
+                high_c = "고가" if "고가" in cols else "High"
+                low_c = "저가" if "저가" in cols else "Low"
+                vol_c = "거래량" if "거래량" in cols else "Volume"
+                df = df.resample(resample_map[period]).agg({
+                    open_c: "first", high_c: "max", low_c: "min",
+                    close_c: "last", vol_c: "sum"
+                }).dropna()
             df = df.reset_index()
             df.columns = [c.strip() for c in df.columns]
             close_col = "종가" if "종가" in df.columns else "Close"
             date_col = "날짜" if "날짜" in df.columns else df.columns[0]
             df["change_pct"] = df[close_col].pct_change() * 100
 
-            events = []
+            # 1단계: threshold 넘는 이벤트 후보 수집
+            candidates = []
             for _, row in df.iterrows():
                 chg = row.get("change_pct", 0)
                 if pd.isna(chg) or abs(chg) < threshold:
                     continue
                 d = row[date_col]
                 date_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+                vol = row.get("거래량", row.get("Volume", 0))
+                candidates.append({
+                    "date_str": date_str,
+                    "chg": float(chg),
+                    "close": int(row[close_col]),
+                    "vol": vol,
+                })
 
-                # 뉴스 검색 (캐시)
+            # 2단계: 변동폭 큰 순으로 상위 max_events개만 선택
+            candidates.sort(key=lambda x: abs(x["chg"]), reverse=True)
+            candidates = candidates[:max_events]
+            candidates.sort(key=lambda x: x["date_str"])
+
+            # 3단계: 선택된 이벤트에 대해서만 뉴스 검색 (국내: 네이버)
+            day_range = {"day": 1, "month": 1, "year": 3, "5year": 7, "10year": 14}.get(period, 1)
+            events = []
+            for c in candidates:
+                date_str = c["date_str"]
+                chg = c["chg"]
                 cache_key = f"{s.stock_code}_{date_str}"
                 if cache_key not in _news_cache:
                     query = s.stock_name if s.stock_name else s.stock_code
-                    _news_cache[cache_key] = _search_naver_news(query, date_str)
+                    _news_cache[cache_key] = _search_naver_news(query, date_str, day_range=day_range)
 
                 news = _news_cache[cache_key]
-                vol = row.get("거래량", row.get("Volume", 0))
                 if news:
                     reason = " | ".join(news)
                 else:
-                    reason = f"{'급등' if chg > 0 else '급락'} {chg:+.1f}% (거래량: {int(vol):,})"
+                    reason = f"{'급등' if chg > 0 else '급락'} {chg:+.1f}% (거래량: {int(c['vol']):,})"
                 events.append({
                     "time": date_str,
-                    "change_pct": round(float(chg), 2),
+                    "change_pct": round(chg, 2),
                     "direction": "up" if chg > 0 else "down",
                     "reason": reason,
                     "news": news,
-                    "price": int(row[close_col]),
+                    "price": c["close"],
                 })
         return jsonify({"events": events})
     except Exception as e:
@@ -334,7 +414,13 @@ def backtest_strategy(sid):
 
     s = Strategy.query.get_or_404(sid)
     period = request.args.get("period", "year")
-    initial_capital = float(request.args.get("capital", 10000000))
+    try:
+        raw_capital = request.args.get("capital", "10000000")
+        initial_capital = float(raw_capital.replace(",", "").strip())
+        if initial_capital <= 0:
+            return jsonify({"error": "자본금은 0보다 커야 합니다"}), 400
+    except (ValueError, AttributeError):
+        return jsonify({"error": "잘못된 자본금 형식입니다"}), 400
     commission_rate = 0.00015  # 0.015%
 
     today = date.today()
@@ -556,10 +642,32 @@ def ai_analyze(sid):
             ohlcv = get_daily_ohlcv(s.stock_code, s.mode, count=100)
             current = get_current_price(s.stock_code, s.mode)
         result = analyze_stock(ohlcv, current, s.params or {})
+
+        # AuctionAlert 저장 → alert_id 부여 → 매수/매도 버튼 활성화
+        qty = (s.params or {}).get("buy_qty", 1)
+        alert = AuctionAlert(
+            strategy_id=s.id,
+            stock_code=s.stock_code,
+            stock_name=s.stock_name,
+            suggested_action=result.get("action", "hold"),
+            suggested_price=current["price"],
+            suggested_qty=qty,
+            ai_confidence=result.get("confidence", 0),
+            ai_score=result.get("total_score", 0),
+            ai_summary=result.get("summary", ""),
+            ai_factors=result.get("factors", []),
+            expires_at=datetime.now() + timedelta(minutes=10),
+        )
+        db.session.add(alert)
+        db.session.commit()
+
+        result["id"] = alert.id
         result["stock_code"] = s.stock_code
         result["stock_name"] = s.stock_name
         result["price"] = current["price"]
         result["change_rate"] = current["change_rate"]
+        result["suggested_qty"] = qty
+        result["expires_at"] = alert.expires_at.isoformat()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

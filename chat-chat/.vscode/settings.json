@@ -1,0 +1,10 @@
+{
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "extraPaths": [
+    "AI_Agent",
+    "AI_Agent/tools"
+  ],
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none"
+}

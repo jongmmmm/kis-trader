@@ -69,12 +69,13 @@ def _headers(mode: str, tr_id: str) -> dict:
 
 def get_current_price(stock_code: str, mode: str = "paper") -> dict:
     """현재가 조회 → {"price": 70000, "change_rate": 1.23, "volume": ...}"""
-    url = f"{_base_url(mode)}/uapi/domestic-stock/v1/quotations/inquire-price"
+    qmode = "real"  # 시세 조회는 항상 실전 서버 사용 (모의서버 장외시간 불안정)
+    url = f"{_base_url(qmode)}/uapi/domestic-stock/v1/quotations/inquire-price"
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_INPUT_ISCD": stock_code,
     }
-    resp = requests.get(url, headers=_headers(mode, "FHKST01010100"), params=params, timeout=10)
+    resp = requests.get(url, headers=_headers(qmode, "FHKST01010100"), params=params, timeout=10)
     resp.raise_for_status()
     output = resp.json().get("output", {})
     return {
@@ -149,13 +150,14 @@ def place_order(stock_code: str, order_type: str, price: int,
 
 def get_index_price(index_code: str, mode: str = "paper") -> dict:
     """업종 지수 현재가 조회 (0001=코스피, 1001=코스닥)"""
-    url = f"{_base_url(mode)}/uapi/domestic-stock/v1/quotations/inquire-index-price"
+    qmode = "real"  # 시세 조회는 항상 실전 서버 사용
+    url = f"{_base_url(qmode)}/uapi/domestic-stock/v1/quotations/inquire-index-price"
     params = {
         "FID_COND_MRKT_DIV_CODE": "U",
         "FID_INPUT_ISCD": index_code,
     }
     resp = requests.get(
-        url, headers=_headers(mode, "FHPUP02100000"), params=params, timeout=10
+        url, headers=_headers(qmode, "FHPUP02100000"), params=params, timeout=10
     )
     resp.raise_for_status()
     output = resp.json().get("output", {})
@@ -172,7 +174,8 @@ def get_index_price(index_code: str, mode: str = "paper") -> dict:
 
 def get_volume_rank(mode: str = "paper") -> list:
     """거래량 상위 종목 조회"""
-    url = f"{_base_url(mode)}/uapi/domestic-stock/v1/quotations/volume-rank"
+    qmode = "real"  # 시세 조회는 항상 실전 서버 사용
+    url = f"{_base_url(qmode)}/uapi/domestic-stock/v1/quotations/volume-rank"
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_COND_SCR_DIV_CODE": "20171",
@@ -186,7 +189,7 @@ def get_volume_rank(mode: str = "paper") -> list:
         "FID_VOL_CNT": "0",
         "FID_INPUT_DATE_1": "",
     }
-    resp = requests.get(url, headers=_headers(mode, "FHPST01710000"), params=params, timeout=10)
+    resp = requests.get(url, headers=_headers(qmode, "FHPST01710000"), params=params, timeout=10)
     resp.raise_for_status()
     output = resp.json().get("output", [])
     result = []
@@ -258,13 +261,14 @@ def _overseas_exchange_code(excd: str) -> str:
 
 def get_overseas_current_price(stock_code: str, excd: str = "NAS", mode: str = "paper") -> dict:
     """해외 현재가 조회"""
-    url = f"{_base_url(mode)}/uapi/overseas-price/v1/quotations/price"
+    qmode = "real"  # 시세 조회는 항상 실전 서버 사용
+    url = f"{_base_url(qmode)}/uapi/overseas-price/v1/quotations/price"
     params = {
         "AUTH": "",
         "EXCD": excd,
         "SYMB": stock_code,
     }
-    resp = requests.get(url, headers=_headers(mode, "HHDFS00000300"), params=params, timeout=10)
+    resp = requests.get(url, headers=_headers(qmode, "HHDFS00000300"), params=params, timeout=10)
     resp.raise_for_status()
     output = resp.json().get("output", {})
     return {

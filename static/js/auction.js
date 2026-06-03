@@ -120,10 +120,120 @@ function showAuctionPopup(data) {
   document.getElementById("auction-overlay").classList.add("show");
 }
 
+// ─── 주문 설정 모달 ───
+var _orderDecision = null;
+
+function openOrderModal(decision) {
+  _orderDecision = decision;
+  var overlay = document.getElementById("order-overlay");
+  var title = document.getElementById("order-config-title");
+  var confirmBtn = document.getElementById("order-confirm-btn");
+  var priceInput = document.getElementById("order-price-input");
+  var qtyInput = document.getElementById("order-qty-input");
+  var typeSelect = document.getElementById("order-type-select");
+  var stockInfo = document.getElementById("order-stock-info");
+
+  // 종목 정보 표시
+  var stockName = document.getElementById("au-name").textContent;
+  var stockCode = document.getElementById("au-code").textContent;
+  stockInfo.textContent = stockName + " " + stockCode;
+
+  // AI 추천 가격/수량 세팅
+  var suggestedPrice = document.getElementById("au-price").textContent.replace(/,/g, "");
+  var suggestedQty = document.getElementById("au-qty-info").textContent.replace("주", "");
+  priceInput.value = parseInt(suggestedPrice) || 0;
+  priceInput.disabled = false;
+  qtyInput.value = parseInt(suggestedQty) || 1;
+  typeSelect.value = "limit";
+
+  if (decision === "buy") {
+    title.innerHTML = '<i class="fa-solid fa-arrow-up me-2"></i>매수 주문';
+    title.style.color = "#0d6efd";
+    confirmBtn.className = "btn btn-primary flex-fill py-2 fw-bold";
+  } else {
+    title.innerHTML = '<i class="fa-solid fa-arrow-down me-2"></i>매도 주문';
+    title.style.color = "#dc3545";
+    confirmBtn.className = "btn btn-danger flex-fill py-2 fw-bold";
+  }
+
+  updateOrderTotal();
+  // AI 분석 팝업 숨기고 주문 모달 표시
+  document.getElementById("auction-overlay").classList.remove("show");
+  overlay.style.display = "flex";
+}
+
+function closeOrderModal() {
+  document.getElementById("order-overlay").style.display = "none";
+  _orderDecision = null;
+  // AI 분석 팝업 다시 표시
+  document.getElementById("auction-overlay").classList.add("show");
+}
+
+function updateOrderTotal() {
+  var price = parseInt(document.getElementById("order-price-input").value) || 0;
+  var qty = parseInt(document.getElementById("order-qty-input").value) || 0;
+  document.getElementById("order-total").textContent = (price * qty).toLocaleString();
+}
+
+// 입력 변경 시 예상 금액 업데이트
+document.addEventListener("DOMContentLoaded", function() {
+  var priceInput = document.getElementById("order-price-input");
+  var qtyInput = document.getElementById("order-qty-input");
+  var typeSelect = document.getElementById("order-type-select");
+  if (priceInput) priceInput.addEventListener("input", updateOrderTotal);
+  if (qtyInput) qtyInput.addEventListener("input", updateOrderTotal);
+  if (typeSelect) typeSelect.addEventListener("change", function() {
+    var priceInput = document.getElementById("order-price-input");
+    if (this.value === "market") {
+      priceInput.value = 0;
+      priceInput.disabled = true;
+    } else {
+      priceInput.disabled = false;
+      var suggestedPrice = document.getElementById("au-price").textContent.replace(/,/g, "");
+      priceInput.value = parseInt(suggestedPrice) || 0;
+    }
+    updateOrderTotal();
+  });
+});
+
+function confirmOrder() {
+  if (!_currentAlertId || !_orderDecision) return;
+  var price = parseInt(document.getElementById("order-price-input").value) || 0;
+  var qty = parseInt(document.getElementById("order-qty-input").value) || 0;
+  var orderType = document.getElementById("order-type-select").value;
+
+  if (qty <= 0) { alert("수량을 입력해주세요."); return; }
+  if (orderType === "limit" && price <= 0) { alert("가격을 입력해주세요."); return; }
+
+  var label = _orderDecision === "buy" ? "매수" : "매도";
+  var priceText = orderType === "market" ? "시장가" : price.toLocaleString() + "원";
+  if (!confirm(label + " 주문을 실행합니다.\n\n" + priceText + " × " + qty + "주 = " + (price * qty).toLocaleString() + "원\n\n진행하시겠습니까?")) return;
+
+  fetch("/api/auction/decide/" + _currentAlertId, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      decision: _orderDecision,
+      price: price,
+      quantity: qty,
+    }),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      document.getElementById("auction-overlay").classList.remove("show");
+      document.getElementById("order-overlay").style.display = "none";
+      _currentAlertId = null;
+      _orderDecision = null;
+      if (d.message) alert(d.message);
+    })
+    .catch(function() { alert("주문 처리 실패"); });
+}
+
 function auctionDecide(decision) {
   if (!_currentAlertId) return;
   if (decision === "pass") {
     document.getElementById("auction-overlay").classList.remove("show");
+    document.getElementById("order-overlay").style.display = "none";
     var passedId = _currentAlertId;
     _currentAlertId = null;
     fetch("/api/auction/decide/" + passedId, {
@@ -133,18 +243,6 @@ function auctionDecide(decision) {
     });
     return;
   }
-  fetch("/api/auction/decide/" + _currentAlertId, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ decision: decision }),
-  })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      document.getElementById("auction-overlay").classList.remove("show");
-      _currentAlertId = null;
-      if (d.message) alert(d.message);
-    })
-    .catch(function() { alert("처리 실패"); });
 }
 
 // 페이지 로드 시 미결 알림 확인

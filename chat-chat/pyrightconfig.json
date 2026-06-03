@@ -1,0 +1,11 @@
+{
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "extraPaths": [
+    "AI_Agent",
+    "AI_Agent/tools"
+  ],
+  "venvPath": "C:/project/chat_project/ohsungjun_chat",
+  "venv": "venv",
+  "typeCheckingMode": "off"
+}
